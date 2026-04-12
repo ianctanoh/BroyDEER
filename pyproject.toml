@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brodeer"
+version = "0.1.0"
+description = "Unified fixed-point solvers for discrete-time dynamical systems"
+requires-python = ">=3.10"
+dependencies = [
+    "jax>=0.4.38,<0.5",
+    "jax[cuda12]>=0.4.38,<0.5; sys_platform == 'linux'",
+    "equinox",
+    "ipykernel",
+    "matplotlib",
+    "tqdm",
+    "scipy",
+    "wandb",
+    "pytest",
+    "hydra-core",
+    "lightning",
+    "packaging",
+    "seaborn",
+    "tensorflow-probability[jax]>=0.25.0",
+]
+
+[tool.setuptools]
+packages = { find = { where = ["src"] } }

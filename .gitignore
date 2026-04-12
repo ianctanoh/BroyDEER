@@ -1,0 +1,10 @@
+__pycache__/
+*.egg-info/
+brodeer_venv/
+*.pyc
+.ipynb_checkpoints/
+wandb/
+pretrained_models/
+*.pt
+*.pth
+.claude/
