@@ -3,6 +3,7 @@ S: 10
 T: 10000
 num_iters: 200
 tol: 1e-2
+batch_size: 16
 nwarmups: 3
 nreps: 3
 mode: "online"
@@ -20,6 +21,7 @@ acc_init: "identity"
 acc_damping: 0.8
 acc_eps_gram: 1e-6
 acc_gamma: 0.
+acc_compress: "svd"
 
 hydra:
   run:

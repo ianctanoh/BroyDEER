@@ -56,6 +56,7 @@ def main(cfg: DictConfig):
     T = cfg.T
     num_iters = cfg.num_iters
     tol = cfg.tol
+    batch_size = cfg.batch_size
     nwarmups = cfg.nwarmups
     nreps = cfg.nreps
     mode = cfg.mode
@@ -91,7 +92,8 @@ def main(cfg: DictConfig):
     initial_state = deer_fxn(initial_state, step_key)
 
     key, drivers_key = jr.split(key)
-    drivers = jr.split(drivers_key, T)
+    driver_keys = jr.split(drivers_key, batch_size)
+    drivers = jax.vmap(lambda k: jr.split(k, T))(driver_keys)  # (batch_size, T, 2)
     states_guess = jnp.broadcast_to(initial_state, (T, D))
 
     # define evaluation functions — pass drivers as argument (not closed over)
@@ -168,10 +170,10 @@ def main(cfg: DictConfig):
 
     if use_highest:
         with jax.default_matmul_precision("highest"):
-            fxn = jax.jit(eval_fns[alg])
+            fxn = jax.jit(jax.vmap(eval_fns[alg]))
             fxn.lower(drivers).compile()
     else:
-        fxn = jax.jit(eval_fns[alg])
+        fxn = jax.jit(jax.vmap(eval_fns[alg]))
         fxn.lower(drivers).compile()
 
     # warmup (triggers compilation) + timed runs
@@ -200,7 +202,7 @@ def main(cfg: DictConfig):
     if alg == "seq":
         n_iters = T
     else:
-        n_iters = int(result)
+        n_iters = float(jnp.mean(result))
 
     print(f"{alg} | S={S}, T={T}, D={D} | time: {time_avg:.3e}s | n_iters: {n_iters}")
 
