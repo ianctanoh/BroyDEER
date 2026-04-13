@@ -31,6 +31,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 import jax
+assert jax.devices()[0].platform == "gpu", f"No GPU found. Devices: {jax.devices()}"
 import jax.numpy as jnp
 import jax.random as jr
 import hydra
