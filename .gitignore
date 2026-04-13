@@ -8,3 +8,5 @@ pretrained_models/
 *.pt
 *.pth
 .claude/
+.hydra/
+outputs/

@@ -1,0 +1,28 @@
+seed: 13
+S: 10
+T: 10000
+num_iters: 200
+tol: 1e-2
+nwarmups: 3
+nreps: 3
+mode: "online"
+alg: "deer"
+
+# Broyden-DEER specific
+bd_m: 3
+bd_init: "identity"
+bd_damping: 0.5
+bd_gamma: 0.
+
+# Accelerated Broyden specific
+acc_k: 2
+acc_init: "identity"
+acc_damping: 0.8
+acc_eps_gram: 1e-6
+acc_gamma: 0.
+
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: False
