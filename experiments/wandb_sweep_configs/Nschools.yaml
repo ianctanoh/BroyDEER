@@ -1,0 +1,54 @@
+# N-schools sweep: compare algorithms across school counts and chain lengths
+command:
+  - ${env}
+  - JAX_PLATFORMS=cpu
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+method: grid
+program: harness_Nschools.py
+parameters:
+  alg:
+    values: ['deer', 'quasi', 'accelerated_broyden']
+  S:
+    values: [10]
+  T:
+    values: [10000]
+  seed:
+    values: [0]
+  batch_size:
+    value: 16
+  num_iters:
+    value: 200
+  tol:
+    value: 1e-2
+  nwarmups:
+    value: 3
+  nreps:
+    value: 3
+  mode:
+    value: "online"
+  deer_k:
+    value: 0.0
+  bd_m:
+    value: 3
+  bd_init:
+    value: "identity"
+  bd_k:
+    value: 0.5
+  bd_gamma:
+    value: 0.
+  acc_m:
+    value: 2
+  acc_init:
+    value: "identity"
+  acc_k:
+    value: 0.2
+  acc_eps_gram:
+    value: 1e-6
+  acc_gamma:
+    value: 0.
+  acc_compress:
+    value: "svd"
+project: broydeer
+name: Nschools_sweep

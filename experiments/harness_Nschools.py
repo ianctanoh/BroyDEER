@@ -13,25 +13,26 @@ Options for alg are:
 Sweepable parameters:
   S              : number of schools (8, 16, 32, ...)
   T              : chain length / number of Gibbs samples
+  deer_k         : DEER / quasi-DEER damping (0 = no damping)
   bd_m           : Broyden-DEER rank
   bd_init        : Broyden-DEER init scheme (jac, identity, rescaled_identity, fresh_jac)
-  bd_damping     : Broyden-DEER damping
-  acc_k          : Accelerated Broyden rank
+  bd_k           : Broyden-DEER damping (0 = no damping)
+  acc_m          : Accelerated Broyden rank
   acc_init       : Accelerated Broyden init scheme (autodiff, identity, rescaled_identity)
-  acc_damping    : Accelerated Broyden damping
+  acc_k          : Accelerated Broyden damping (0 = no damping)
   acc_eps_gram   : Accelerated Broyden Gram regularization
 
 Example usage:
   python harness.py alg=deer S=8 T=10000
   python harness.py -m alg=deer,quasi,picard,jacobi S=8,16,32 T=10000
-  python harness.py alg=broyden bd_m=1,2,3,4 bd_init=jac,identity bd_damping=0.5,1.0
+  python harness.py alg=broyden bd_m=1,2,3,4 bd_init=jac,identity bd_k=0.0,0.5
 """
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 import jax
-assert jax.devices()[0].platform == "gpu", f"No GPU found. Devices: {jax.devices()}"
+# assert jax.devices()[0].platform == "gpu", f"No GPU found. Devices: {jax.devices()}"
 import jax.numpy as jnp
 import jax.random as jr
 import hydra
@@ -49,7 +50,7 @@ from algs.broyden_deer import broyden_deer_alg
 from algs.accelerated_broyden import accelerated_broyden_deer_alg
 
 
-@hydra.main(config_path="configs", config_name="harness")
+@hydra.main(config_path="configs", config_name="harness_Nschools")
 def main(cfg: DictConfig):
     seed = cfg.seed
     S = cfg.S
@@ -64,6 +65,7 @@ def main(cfg: DictConfig):
 
     logger = WandbLogger(project="broydeer", mode=mode)
     logger.log_hyperparams(OmegaConf.to_container(cfg))
+    wandb.config.update(OmegaConf.to_container(cfg), allow_val_change=True)
 
     # set up dynamics
     deer_fxn, params, xs, D = make_eight_schools(S=S, seed=seed)
@@ -108,14 +110,15 @@ def main(cfg: DictConfig):
     def deer_eval(drivers):
         _, _, newton_steps, *_ = deer_alg(
             deer_fxn, initial_state, states_guess, drivers,
-            num_iters, full_trace=False, tol=tol,
+            num_iters, k=cfg.deer_k,
+            full_trace=False, tol=tol,
         )
         return newton_steps
 
     def quasi_eval(drivers):
         _, _, newton_steps, *_ = deer_alg(
             deer_fxn, initial_state, states_guess, drivers,
-            num_iters, quasi=True,
+            num_iters, quasi=True, k=cfg.deer_k,
             full_trace=False, tol=tol,
         )
         return newton_steps
@@ -138,7 +141,7 @@ def main(cfg: DictConfig):
         _, _, newton_steps, *_ = broyden_deer_alg(
             deer_fxn, initial_state, states_guess, drivers,
             num_iters, m=cfg.bd_m, init=cfg.bd_init,
-            damping=cfg.bd_damping, gamma=cfg.bd_gamma,
+            k=cfg.bd_k, gamma=cfg.bd_gamma,
             full_trace=False, tol=tol,
         )
         return newton_steps
@@ -146,9 +149,9 @@ def main(cfg: DictConfig):
     def accelerated_broyden_eval(drivers):
         _, _, newton_steps, *_ = accelerated_broyden_deer_alg(
             deer_fxn, initial_state, states_guess, drivers,
-            num_iters, k=cfg.acc_k, init=cfg.acc_init,
-            damping=cfg.acc_damping, gamma=cfg.acc_gamma,
-            eps_gram=cfg.acc_eps_gram,
+            num_iters, m=cfg.acc_m, init=cfg.acc_init,
+            k=cfg.acc_k, gamma=cfg.acc_gamma,
+            eps_gram=cfg.acc_eps_gram, compress=cfg.acc_compress,
             full_trace=False, tol=tol,
         )
         return newton_steps

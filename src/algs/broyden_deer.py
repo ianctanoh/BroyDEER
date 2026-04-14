@@ -132,13 +132,13 @@ def broyden_solve(d_blocks, U_blocks, V_blocks, r):
 
 # --- Broyden block update ---
 
-def broyden_rank1_update(d_t, U_t, V_t, p_t, target_t, damping=1.0):
+def broyden_rank1_update(d_t, U_t, V_t, p_t, target_t, k=0.0):
     """
     Rank-1 Broyden update for a single subdiagonal block.
     """
     b_p   = lrmat_apply(d_t, U_t, V_t, p_t)
     denom = jnp.dot(p_t, p_t) + 1e-10
-    new_u = damping * (target_t - b_p) / denom
+    new_u = (1 - k) * (target_t - b_p) / denom
     new_v = p_t
 
     U_new = jnp.concatenate([U_t[:, 1:], new_u[:, None]], axis=1)
@@ -146,7 +146,7 @@ def broyden_rank1_update(d_t, U_t, V_t, p_t, target_t, damping=1.0):
     return U_new, V_new
 
 
-def update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, damping=1.0):
+def update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, k=0.0):
     """
     Update all T-1 subdiagonal Broyden blocks in parallel.
     """
@@ -154,7 +154,7 @@ def update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, damping=1.0):
     p      = delta_s[:-1]
     target = y[1:] - delta_s[1:]
 
-    U_inner, V_inner = vmap(lambda d, u, v, p_, t_: broyden_rank1_update(d, u, v, p_, t_, damping))(
+    U_inner, V_inner = vmap(lambda d, u, v, p_, t_: broyden_rank1_update(d, u, v, p_, t_, k))(
         d_eff[:-1], U[:-1], V[:-1], p, target
     )
 
@@ -251,7 +251,7 @@ def broyden_deer_alg(
     gamma: float = 1.0,
     qmem_efficient: bool = False,
     sequential_solve: bool = False,
-    damping: float = 1.0,
+    k: float = 0.0,
     full_trace: bool = False,
     Ts=None,
     reset: bool = True,
@@ -285,7 +285,7 @@ def broyden_deer_alg(
         gamma          : scaling for identity/rescaled_identity init (default 1.0)
         qmem_efficient : if True, use Hutchinson estimator for Jacobian diagonal
         sequential_solve : if True, use sequential forward substitution
-        damping        : scaling for rank-1 corrections (default 1.0)
+        k              : damping parameter for rank-1 corrections (default 0.0, no damping)
         full_trace     : if True, return all intermediate states via scan
         Ts             : optional time indices for multi-checkpoint convergence
         reset          : if True, replace NaN states with states_guess
@@ -395,7 +395,7 @@ def broyden_deer_alg(
         # update Broyden blocks
         if init == "fresh_jac":
             if use_lrmat:
-                U_new, V_new = update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, damping)
+                U_new, V_new = update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, k)
             else:
                 U_new, V_new = U, V
             gamma_new = gamma
@@ -403,12 +403,12 @@ def broyden_deer_alg(
             gamma_new = compute_gamma_rescale(delta_s, r_old, r_new, d=d_init)
             if use_lrmat:
                 d_eff_update = gamma_new[:, None] * d_init
-                U_new, V_new = update_all_blocks(d_eff_update, U, V, delta_s, r_old, r_new, damping)
+                U_new, V_new = update_all_blocks(d_eff_update, U, V, delta_s, r_old, r_new, k)
             else:
                 U_new, V_new = U, V
         else:
             if use_lrmat:
-                U_new, V_new = update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, damping)
+                U_new, V_new = update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, k)
             else:
                 U_new, V_new = U, V
             gamma_new = update_gamma(gamma, delta_s, r_old, r_new, m, iteration, d_init)

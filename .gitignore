@@ -10,3 +10,7 @@ pretrained_models/
 .claude/
 .hydra/
 outputs/
+*.log
+experiments/multirun/
+experiments/saved_files/
+figs/

@@ -1,6 +1,6 @@
 """
 accelerated_broyden.py
-DEER variant: fresh true diagonal + rank-k secant correction per block.
+DEER variant: fresh true diagonal + rank-m secant correction per block.
 
 At each iteration i, the subdiagonal block b_t is:
 
@@ -8,16 +8,16 @@ At each iteration i, the subdiagonal block b_t is:
 
 where:
   - d_t^(i) = -diag(df/dx)|_{X^(i)[t]}   recomputed fresh each iteration
-  - V_t^(i) = [p_t^(i-1), ..., p_t^(i-k)]  the last k Newton steps (sliding window)
-  - U_t^(i) is chosen so that all k secant conditions hold simultaneously:
-        b_t^(i) @ p_t^(i-j) = target_t^(i-j),  j = 1, ..., k
+  - V_t^(i) = [p_t^(i-1), ..., p_t^(i-m)]  the last m Newton steps (sliding window)
+  - U_t^(i) is chosen so that all m secant conditions hold simultaneously:
+        b_t^(i) @ p_t^(i-j) = target_t^(i-j),  j = 1, ..., m
 
     Rearranging:  U_t C_t = R_t
-    where  C_t = V_t^T V_t  (k x k Gram matrix of stored steps)
-           R_t = [target_t^(i-j) - d_t^(i) * p_t^(i-j)]_{j=1}^k  (D x k)
+    where  C_t = V_t^T V_t  (m x m Gram matrix of stored steps)
+           R_t = [target_t^(i-j) - d_t^(i) * p_t^(i-j)]_{j=1}^m  (D x m)
     Solved as:  U_t = solve(C_t + eps I, R_t^T)^T
 
-The block-bidiagonal system is solved via lax.associative_scan with rank-k
+The block-bidiagonal system is solved via lax.associative_scan with rank-m
 QR+SVD compression, or optionally via sequential forward substitution.
 """
 
@@ -34,22 +34,22 @@ from .deer import get_residual, merit_fxn, quasi_diag_estimator
 # --- low-rank matrix-vector product ---
 
 def lrmat_apply(d, U, V, x):
-    """Apply (diag(d) + U V^T) to vector x.  d, x: (D,), U, V: (D, k)."""
+    """Apply (diag(d) + U V^T) to vector x.  d, x: (D,), U, V: (D, m)."""
     return d * x + U @ (V.T @ x)
 
 
-# --- rank-k composition via QR + SVD ---
+# --- rank-m composition via QR + SVD ---
 
-def lrmat_compose(d_a, U_a, V_a, d_b, U_b, V_b, k):
+def lrmat_compose(d_a, U_a, V_a, d_b, U_b, V_b, m):
     """
-    Rank-k approximation of (diag(d_b) + U_b V_b^T)(diag(d_a) + U_a V_a^T).
+    Rank-m approximation of (diag(d_b) + U_b V_b^T)(diag(d_a) + U_a V_a^T).
 
-    Exact rank-2k factorization:
+    Exact rank-2m factorization:
         Uc = [ D_b U_a  |  U_b ]
         Vc = [ V_a      |  D_a V_b + V_a M^T ]   where M = V_b^T U_a
 
-    Compressed to rank-k via thin QR + truncated SVD on the (2k x 2k) core.
-    O(D k + k^3) cost.
+    Compressed to rank-m via thin QR + truncated SVD on the (2m x 2m) core.
+    O(D m + m^3) cost.
     """
     M  = V_b.T @ U_a
     Uc = jnp.concatenate([-d_b[:, None] * U_a, -U_b],       axis=1)
@@ -60,10 +60,10 @@ def lrmat_compose(d_a, U_a, V_a, d_b, U_b, V_b, k):
     K = Ru @ Rv.T
 
     Uk, sk, Vtk = jnp.linalg.svd(K, full_matrices=False)
-    sh    = jnp.sqrt(jnp.abs(sk[:k]))
+    sh    = jnp.sqrt(jnp.abs(sk[:m]))
     d_new = -(d_b * d_a)
-    U_new = (Qu @ Uk[:, :k]) * sh
-    V_new = (Qv @ Vtk[:k, :].T) * sh
+    U_new = (Qu @ Uk[:, :m]) * sh
+    V_new = (Qv @ Vtk[:m, :].T) * sh
     return d_new, U_new, V_new
 
 
@@ -128,11 +128,11 @@ def lrmat_compose_k1(d_a, U_a, V_a, d_b, U_b, V_b):
     return d_new, U_new, V_new
 
 
-def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, k, key):
+def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, m, key):
     """
-    GPU-friendly rank-k composition via randomized range finder.
-    No QR on (D,2k), no SVD. Just sketch + GS on k columns + matmuls.
-    Uses ℓ = k (no oversampling).
+    GPU-friendly rank-m composition via randomized range finder.
+    No QR on (D,2m), no SVD. Just sketch + GS on m columns + matmuls.
+    Uses ℓ = m (no oversampling).
     """
     D = d_a.shape[0]
 
@@ -141,37 +141,37 @@ def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, k, key):
     Vc = jnp.concatenate([V_a, d_a[:, None] * V_b + V_a @ M.T], axis=1)
 
     # Gaussian sketch matrix (different key per composition)
-    G = jr.normal(key, (D, k))
+    G = jr.normal(key, (D, m))
 
     # Sketch: H = (Uc Vc^T) G = Uc (Vc^T G)
-    H = Uc @ (Vc.T @ G)                       # (D, k)
+    H = Uc @ (Vc.T @ G)                       # (D, m)
 
-    # Orthonormalize H via Modified Gram-Schmidt (k columns)
+    # Orthonormalize H via Modified Gram-Schmidt (m columns)
     qs = []
-    for i in range(k):
+    for i in range(m):
         v = H[:, i]
         for j in range(i):
             v = v - jnp.dot(qs[j], v) * qs[j]
         v = v / jnp.maximum(jnp.linalg.norm(v), 1e-30)
         qs.append(v)
-    Q = jnp.stack(qs, axis=1)                  # (D, k)
+    Q = jnp.stack(qs, axis=1)                  # (D, m)
 
     # Factored form: A ≈ Q (Q^T A) = Q (Q^T Uc) Vc^T = U_new V_new^T
-    P = Q.T @ Uc                               # (k, 2k)
-    V_new = Vc @ P.T                           # (D, k)
+    P = Q.T @ Uc                               # (m, 2m)
+    V_new = Vc @ P.T                           # (D, m)
 
     d_new = -(d_b * d_a)
     return d_new, Q, V_new
 
 
-def lrmat_compose_gpu(d_a, U_a, V_a, d_b, U_b, V_b, k):
+def lrmat_compose_gpu(d_a, U_a, V_a, d_b, U_b, V_b, m):
     """
-    GPU-friendly rank-k composition for general k.
+    GPU-friendly rank-m composition for general m.
     Replaces jnp.linalg.qr on (D, 2k) matrices with unrolled Modified
     Gram-Schmidt (pure vector ops, XLA-fuseable).  Keeps jnp.linalg.svd
     on the tiny (2k, 2k) core for exact truncation.
     """
-    n = 2 * k
+    n = 2 * m
 
     M = V_b.T @ U_a
     Uc = jnp.concatenate([-d_b[:, None] * U_a, -U_b], axis=1)
@@ -211,26 +211,26 @@ def lrmat_compose_gpu(d_a, U_a, V_a, d_b, U_b, V_b, k):
     # --- Exact truncated SVD on tiny core ---
     Uk, sk, Vtk = jnp.linalg.svd(K_core, full_matrices=False)
 
-    sh    = jnp.sqrt(jnp.abs(sk[:k]))
+    sh    = jnp.sqrt(jnp.abs(sk[:m]))
     d_new = -(d_b * d_a)
-    U_new = (Qu @ Uk[:, :k]) * sh
-    V_new = (Qv @ Vtk[:k, :].T) * sh
+    U_new = (Qu @ Uk[:, :m]) * sh
+    V_new = (Qv @ Vtk[:m, :].T) * sh
     return d_new, U_new, V_new
 
 
 # --- combination for associative scan ---
 
-def make_combine(k, compress="rand"):
-    """Return a combine function for lax.associative_scan with rank-k blocks.
+def make_combine(m, compress="rand"):
+    """Return a combine function for lax.associative_scan with rank-m blocks.
 
     compress: "rand" — randomized range finder (no SVD, fastest on GPU)
               "gs_svd" — manual Gram-Schmidt + LAPACK SVD on tiny core
               "qr_svd" — original LAPACK QR + SVD (reference)
 
-    When compress="rand" and k >= 2, the scan state carries a PRNG key per
+    When compress="rand" and m >= 2, the scan state carries a PRNG key per
     element so each composition draws a fresh Gaussian sketch.
     """
-    if k >= 2 and compress == "rand":
+    if m >= 2 and compress == "rand":
         # --- rand path: 6-element state with PRNG key ---
         def combine(elem_a, elem_b):
             alpha_a, d_a, U_a, V_a, dvec_a, key_a = elem_a
@@ -238,17 +238,17 @@ def make_combine(k, compress="rand"):
             alpha_new            = alpha_a * alpha_b
             subkey, new_key      = jr.split(key_a)
             d_new, U_new, V_new  = lrmat_compose_rand(
-                d_a, U_a, V_a, d_b, U_b, V_b, k, subkey)
+                d_a, U_a, V_a, d_b, U_b, V_b, m, subkey)
             dvec_new             = -alpha_b * lrmat_apply(d_b, U_b, V_b, dvec_a) + dvec_b
             return alpha_new, d_new, U_new, V_new, dvec_new, new_key
     else:
         # --- all other paths: 5-element state, no key ---
-        if k == 1:
+        if m == 1:
             _compose = lrmat_compose_k1
         elif compress == "gs_svd":
-            _compose = lambda da, Ua, Va, db, Ub, Vb: lrmat_compose_gpu(da, Ua, Va, db, Ub, Vb, k)
+            _compose = lambda da, Ua, Va, db, Ub, Vb: lrmat_compose_gpu(da, Ua, Va, db, Ub, Vb, m)
         else:
-            _compose = lambda da, Ua, Va, db, Ub, Vb: lrmat_compose(da, Ua, Va, db, Ub, Vb, k)
+            _compose = lambda da, Ua, Va, db, Ub, Vb: lrmat_compose(da, Ua, Va, db, Ub, Vb, m)
         def combine(elem_a, elem_b):
             alpha_a, d_a, U_a, V_a, dvec_a = elem_a
             alpha_b, d_b, U_b, V_b, dvec_b = elem_b
@@ -261,24 +261,24 @@ def make_combine(k, compress="rand"):
 
 # --- block-bidiagonal solve (parallel) ---
 
-def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, k, compress="rand"):
+def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand"):
     """Solve  B @ delta_s = -r  via lax.associative_scan."""
     T, D = d_blocks.shape
     alphas = jnp.ones(T).at[0].set(0.0)
     d_scan = jnp.concatenate([jnp.ones((1, D)),     d_blocks[:-1]], axis=0)
-    U_scan = jnp.concatenate([jnp.zeros((1, D, k)), U_blocks[:-1]], axis=0)
-    V_scan = jnp.concatenate([jnp.zeros((1, D, k)), V_blocks[:-1]], axis=0)
+    U_scan = jnp.concatenate([jnp.zeros((1, D, m)), U_blocks[:-1]], axis=0)
+    V_scan = jnp.concatenate([jnp.zeros((1, D, m)), V_blocks[:-1]], axis=0)
     dvec   = -r
 
-    if k >= 2 and compress == "rand":
+    if m >= 2 and compress == "rand":
         keys = jr.split(jr.PRNGKey(42), T)
         _, _, _, _, delta_s, _ = lax.associative_scan(
-            vmap(make_combine(k, compress=compress)),
+            vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec, keys), reverse=False,
         )
     else:
         _, _, _, _, delta_s = lax.associative_scan(
-            vmap(make_combine(k, compress=compress)),
+            vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec), reverse=False,
         )
     return delta_s
@@ -302,12 +302,12 @@ def solve_rankk_bidiag_sequential(d_blocks, U_blocks, V_blocks, r):
 
 # --- orthonormal basis helpers ---
 
-def _update_basis_ortho(V_old, Gamma_old, p_new, q_new, n_valid, k, delta=1e-12):
+def _update_basis_ortho(V_old, Gamma_old, p_new, q_new, n_valid, m, delta=1e-12):
     """
     Incrementally update an orthonormal basis V and paired targets Gamma
     when a new secant pair (p_new, q_new) arrives.
     """
-    col_mask = (jnp.arange(k) >= (k - n_valid)).astype(V_old.dtype)
+    col_mask = (jnp.arange(m) >= (m - n_valid)).astype(V_old.dtype)
 
     alpha = (V_old.T @ p_new) * col_mask
     p_tilde = p_new - V_old @ alpha
@@ -320,11 +320,11 @@ def _update_basis_ortho(V_old, Gamma_old, p_new, q_new, n_valid, k, delta=1e-12)
     V_slid = jnp.concatenate([V_old[:, 1:], v_new[:, None]], axis=1)
     Gamma_slid = jnp.concatenate([Gamma_old[:, 1:], q_tilde[:, None]], axis=1)
 
-    insert_idx = k - n_valid - 1
+    insert_idx = m - n_valid - 1
     V_grown = V_old.at[:, insert_idx].set(v_new)
     Gamma_grown = Gamma_old.at[:, insert_idx].set(q_tilde)
 
-    basis_full = n_valid >= k
+    basis_full = n_valid >= m
     V_updated = jnp.where(basis_full, V_slid, V_grown)
     Gamma_updated = jnp.where(basis_full, Gamma_slid, Gamma_grown)
 
@@ -334,10 +334,10 @@ def _update_basis_ortho(V_old, Gamma_old, p_new, q_new, n_valid, k, delta=1e-12)
     return V_new, Gamma_new
 
 
-def _compute_U_ortho(d_t, V_t, Gamma_t, n_valid, k):
+def _compute_U_ortho(d_t, V_t, Gamma_t, n_valid, m):
     """Closed-form U from orthonormal V:  U = Gamma - diag(d) V."""
     U = Gamma_t - d_t[:, None] * V_t
-    col_mask = (jnp.arange(k) >= (k - n_valid)).astype(V_t.dtype)
+    col_mask = (jnp.arange(m) >= (m - n_valid)).astype(V_t.dtype)
     return U * col_mask[None, :]
 
 
@@ -349,13 +349,13 @@ def accelerated_broyden_deer_alg(
     states_guess: jnp.ndarray,
     drivers: jnp.ndarray,
     num_iters: int,
-    k: int = 1,
+    m: int = 1,
     init: str = "autodiff",
     gamma: float = 1.0,
     qmem_efficient: bool = False,
     sequential_solve: bool = False,
     compress: str = "rand",
-    damping: float = 1.0,
+    k: float = 0.0,
     fd_h: float = 1e-5,
     eps_gram: float = 1e-10,
     full_trace: bool = False,
@@ -365,10 +365,10 @@ def accelerated_broyden_deer_alg(
     key=None,
 ):
     """
-    Accelerated Broyden DEER: fresh diagonal + rank-k secant correction.
+    Accelerated Broyden DEER: fresh diagonal + rank-m secant correction.
 
-    Each iteration recomputes the diagonal d_t and fits rank-k secant corrections
-    U_t, V_t from the sliding window of k previous Newton steps.
+    Each iteration recomputes the diagonal d_t and fits rank-m secant corrections
+    U_t, V_t from the sliding window of m previous Newton steps.
 
     Args:
         f              : dynamics function (state, driver) -> new_state
@@ -376,7 +376,7 @@ def accelerated_broyden_deer_alg(
         states_guess   : initial trajectory guess (T, D)
         drivers        : inputs (T, d_in)
         num_iters      : maximum number of outer iterations
-        k              : rank of the secant correction (default 1)
+        m              : rank of the secant correction (default 1)
         init           : diagonal scheme:
                            "autodiff"          -- d_t = -diag(df/dx) via jacfwd (exact)
                            "identity"          -- d_t = -gamma * I (fixed)
@@ -386,7 +386,7 @@ def accelerated_broyden_deer_alg(
         qmem_efficient : if True, use Hutchinson estimator for Jacobian diagonal
                          (only applies to init="autodiff")
         sequential_solve : if True, use sequential forward substitution
-        damping        : scaling factor for the rank-k secant correction (default 1.0)
+        k              : damping parameter for the rank-m secant correction (default 0.0, no damping)
         fd_h           : step size for init="manual" (default 1e-5)
         eps_gram       : regularization for the Gram matrix V^T V (default 1e-10)
         full_trace     : if True, return all intermediate states via scan
@@ -437,8 +437,8 @@ def accelerated_broyden_deer_alg(
             return -gamma * jnp.ones((states_at.shape[0], D))
 
     # --- initial carry ---
-    p_window_init      = jnp.zeros((T, k, D))
-    target_window_init = jnp.zeros((T, k, D))
+    p_window_init      = jnp.zeros((T, m, D))
+    target_window_init = jnp.zeros((T, m, D))
     gamma_init         = -jnp.ones(T)
 
     # --- step function ---
@@ -456,7 +456,7 @@ def accelerated_broyden_deer_alg(
             d_init = jnp.concatenate([d_diag, jnp.ones((1, D))], axis=0)
 
         # compute U, V from secant history
-        if k == 1:
+        if m == 1:
             p_blocks      = p_window[:-1, 0, :]       # (T-1, D)
             target_blocks = target_window[:-1, 0, :]   # (T-1, D)
 
@@ -464,11 +464,11 @@ def accelerated_broyden_deer_alg(
                 v_t = step_t                                          # (D,)
                 r_t = target_t - d_t * v_t                            # (D,)
                 denom = jnp.dot(v_t, v_t) + eps_gram
-                u_t = damping * r_t / denom
+                u_t = (1 - k) * r_t / denom
                 return u_t[:, None], v_t[:, None]                     # (D, 1), (D, 1)
 
             U_inner, V_inner = vmap(compute_UV)(d_init[:-1], p_blocks, target_blocks)
-        elif k == 2:
+        elif m == 2:
             p_blocks      = p_window[:-1]              # (T-1, 2, D)
             target_blocks = target_window[:-1]         # (T-1, 2, D)
 
@@ -479,8 +479,8 @@ def accelerated_broyden_deer_alg(
                 # Manual 2x2 solve via Cramer's rule (avoids cuSOLVER)
                 det = C_t[0, 0] * C_t[1, 1] - C_t[0, 1] * C_t[1, 0]
                 inv_det = 1.0 / jnp.maximum(det, 1e-30)
-                # U_t = damping * R_t @ C_t^{-1}  (C_t is symmetric)
-                U_t = damping * inv_det * jnp.stack([
+                # U_t = (1 - k) * R_t @ C_t^{-1}  (C_t is symmetric)
+                U_t = (1 - k) * inv_det * jnp.stack([
                     R_t[:, 0] * C_t[1, 1] - R_t[:, 1] * C_t[0, 1],
                     R_t[:, 1] * C_t[0, 0] - R_t[:, 0] * C_t[1, 0],
                 ], axis=1)
@@ -488,19 +488,19 @@ def accelerated_broyden_deer_alg(
 
             U_inner, V_inner = vmap(compute_UV)(d_init[:-1], p_blocks, target_blocks)
         else:
-            p_blocks      = p_window[:-1]              # (T-1, k, D)
-            target_blocks = target_window[:-1]         # (T-1, k, D)
+            p_blocks      = p_window[:-1]              # (T-1, m, D)
+            target_blocks = target_window[:-1]         # (T-1, m, D)
 
             def compute_UV(d_t, steps_t, targets_t):
-                V_t = steps_t.T                                       # (D, k)
-                R_t = targets_t.T - d_t[:, None] * V_t                # (D, k)
-                C_t = V_t.T @ V_t + eps_gram * jnp.eye(k)             # (k, k)
-                U_t = damping * jnp.linalg.solve(C_t, R_t.T).T        # (D, k)
+                V_t = steps_t.T                                       # (D, m)
+                R_t = targets_t.T - d_t[:, None] * V_t                # (D, m)
+                C_t = V_t.T @ V_t + eps_gram * jnp.eye(m)             # (m, m)
+                U_t = (1 - k) * jnp.linalg.solve(C_t, R_t.T).T        # (D, m)
                 return U_t, V_t
 
             U_inner, V_inner = vmap(compute_UV)(d_init[:-1], p_blocks, target_blocks)
-        U_blocks = jnp.concatenate([U_inner, jnp.zeros((1, D, k))], axis=0)
-        V_blocks = jnp.concatenate([V_inner, jnp.zeros((1, D, k))], axis=0)
+        U_blocks = jnp.concatenate([U_inner, jnp.zeros((1, D, m))], axis=0)
+        V_blocks = jnp.concatenate([V_inner, jnp.zeros((1, D, m))], axis=0)
 
         # zero out U on first iteration (no secant pairs yet)
         U_blocks = jnp.where(iteration == 0, jnp.zeros_like(U_blocks), U_blocks)
@@ -509,7 +509,7 @@ def accelerated_broyden_deer_alg(
         if sequential_solve:
             delta_s = solve_rankk_bidiag_sequential(d_init, U_blocks, V_blocks, r_old)
         else:
-            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_blocks, r_old, k, compress=compress)
+            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_blocks, r_old, m, compress=compress)
 
         # update states
         new_states = states + delta_s
@@ -618,12 +618,12 @@ def accelerated_broyden_deer_alg_ortho(
     states_guess: jnp.ndarray,
     drivers: jnp.ndarray,
     num_iters: int,
-    k: int = 1,
+    m: int = 1,
     init: str = "autodiff",
     gamma: float = 1.0,
     qmem_efficient: bool = False,
     sequential_solve: bool = False,
-    damping: float = 1.0,
+    k: float = 0.0,
     fd_h: float = 1e-5,
     delta_ortho: float = 1e-12,
     full_trace: bool = False,
@@ -645,7 +645,7 @@ def accelerated_broyden_deer_alg_ortho(
         states_guess   : initial trajectory guess (T, D)
         drivers        : inputs (T, d_in)
         num_iters      : maximum number of outer iterations
-        k              : rank of the secant correction (default 1)
+        m              : rank of the secant correction (default 1)
         init           : diagonal scheme:
                            "autodiff"          -- d_t = -diag(df/dx) via jacfwd (exact)
                            "identity"          -- d_t = -gamma * I (fixed)
@@ -654,7 +654,7 @@ def accelerated_broyden_deer_alg_ortho(
         gamma          : scaling for identity init (default 1.0)
         qmem_efficient : if True, use Hutchinson estimator for Jacobian diagonal
         sequential_solve : if True, use sequential forward substitution
-        damping        : scaling factor for the UV correction (default 1.0)
+        k              : damping parameter for the UV correction (default 0.0, no damping)
         fd_h           : step size for init="manual" (default 1e-5)
         delta_ortho    : threshold for redundancy check in basis update (default 1e-12)
         full_trace     : if True, return all intermediate states via scan
@@ -705,8 +705,8 @@ def accelerated_broyden_deer_alg_ortho(
             return -gamma * jnp.ones((states_at.shape[0], D))
 
     # --- initial carry ---
-    V_basis_init     = jnp.zeros((T, D, k))
-    Gamma_basis_init = jnp.zeros((T, D, k))
+    V_basis_init     = jnp.zeros((T, D, m))
+    Gamma_basis_init = jnp.zeros((T, D, m))
     gamma_init       = -jnp.ones(T)
 
     # --- step function ---
@@ -714,7 +714,7 @@ def accelerated_broyden_deer_alg_ortho(
     def _step(carry, args):
         states, V_basis, Gamma_basis, gamma, is_nan, iteration = carry
 
-        n_valid = jnp.minimum(iteration, k)
+        n_valid = jnp.minimum(iteration, m)
 
         # residuals
         r_old = get_residual(f, initial_state, states, drivers)
@@ -727,8 +727,8 @@ def accelerated_broyden_deer_alg_ortho(
             d_init = jnp.concatenate([d_diag, jnp.ones((1, D))], axis=0)
 
         # compute U from orthonormal V and Gamma
-        U_blocks = damping * vmap(
-            lambda d, V, G: _compute_U_ortho(d, V, G, n_valid, k)
+        U_blocks = (1 - k) * vmap(
+            lambda d, V, G: _compute_U_ortho(d, V, G, n_valid, m)
         )(d_init, V_basis, Gamma_basis)
 
         # zero out U on first iteration (no secant pairs yet)
@@ -738,7 +738,7 @@ def accelerated_broyden_deer_alg_ortho(
         if sequential_solve:
             delta_s = solve_rankk_bidiag_sequential(d_init, U_blocks, V_basis, r_old)
         else:
-            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_basis, r_old, k)
+            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_basis, r_old, m)
 
         # update states
         new_states = states + delta_s
@@ -757,7 +757,7 @@ def accelerated_broyden_deer_alg_ortho(
         )
 
         V_new, Gamma_new = vmap(
-            lambda V, G, p, q: _update_basis_ortho(V, G, p, q, n_valid, k, delta_ortho)
+            lambda V, G, p, q: _update_basis_ortho(V, G, p, q, n_valid, m, delta_ortho)
         )(V_basis, Gamma_basis, delta_s, new_target)
 
         # gamma update (for rescaled_identity)
