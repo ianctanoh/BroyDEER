@@ -23,7 +23,6 @@ QR+SVD compression, or optionally via sequential forward substitution.
 
 from typing import Callable, Optional
 import jax
-jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap, lax, jacfwd
@@ -165,6 +164,19 @@ def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, m, key):
     return d_new, Q, V_new
 
 
+def lrmat_compose_zero_diag(d_a, U_a, V_a, d_b, U_b, V_b):
+    """
+    Exact rank-m composition when d_b = 0 (always true for blocks 1:T-1).
+    (U_b V_b^T)(diag(d_a) + U_a V_a^T) = U_b (d_a^T V_b + (V_b^T U_a) V_a)^T
+    Handles boundary block 0 (d_a=1, U_a=V_a=0) correctly.
+    """
+    M = V_b.T @ U_a                               # (m, m)
+    d_new = -(d_b * d_a)
+    U_new = -U_b                                   # (D, m)
+    V_new = d_a[:, None] * V_b + V_a @ M.T         # (D, m)
+    return d_new, U_new, V_new
+
+
 def lrmat_compose_gpu(d_a, U_a, V_a, d_b, U_b, V_b, m):
     """
     GPU-friendly rank-m composition for general m.
@@ -224,12 +236,13 @@ def lrmat_compose_gpu(d_a, U_a, V_a, d_b, U_b, V_b, m):
 def make_combine(m, compress="rand"):
     """Return a combine function for lax.associative_scan with rank-m blocks.
 
-    compress: "rand" — randomized range finder (no SVD, fastest on GPU)
-              "gs_svd" — manual Gram-Schmidt + LAPACK SVD on tiny core
-              "qr_svd" — original LAPACK QR + SVD (reference)
+    compress: "rand"      — randomized range finder (no SVD, fastest on GPU)
+              "low_rank_exact" — like rand, but uses exact composition when both diags are zero
+              "gs_svd"    — manual Gram-Schmidt + LAPACK SVD on tiny core
+              "qr_svd"    — original LAPACK QR + SVD (reference)
 
-    When compress="rand" and m >= 2, the scan state carries a PRNG key per
-    element so each composition draws a fresh Gaussian sketch.
+    When compress starts with "rand" and m >= 2, the scan state carries a PRNG
+    key per element so each composition draws a fresh Gaussian sketch.
     """
     if m >= 2 and compress == "rand":
         # --- rand path: 6-element state with PRNG key ---
@@ -246,6 +259,8 @@ def make_combine(m, compress="rand"):
         # --- all other paths: 5-element state, no key ---
         if m == 1:
             _compose = lrmat_compose_k1
+        elif compress == "low_rank_exact":
+            _compose = lrmat_compose_zero_diag
         elif compress == "gs_svd":
             _compose = lambda da, Ua, Va, db, Ub, Vb: lrmat_compose_gpu(da, Ua, Va, db, Ub, Vb, m)
         else:
@@ -264,17 +279,11 @@ def make_combine(m, compress="rand"):
 
 def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iteration=0):
     """Solve  B @ delta_s = -r  via lax.associative_scan."""
-    orig_dtype = r.dtype
-    d_blocks = d_blocks.astype(jnp.float64)
-    U_blocks = U_blocks.astype(jnp.float64)
-    V_blocks = V_blocks.astype(jnp.float64)
-    r        = r.astype(jnp.float64)
-
     T, D = d_blocks.shape
-    alphas = jnp.ones(T, dtype=jnp.float64).at[0].set(0.0)
-    d_scan = jnp.concatenate([jnp.ones((1, D), dtype=jnp.float64),     d_blocks[:-1]], axis=0)
-    U_scan = jnp.concatenate([jnp.zeros((1, D, m), dtype=jnp.float64), U_blocks[:-1]], axis=0)
-    V_scan = jnp.concatenate([jnp.zeros((1, D, m), dtype=jnp.float64), V_blocks[:-1]], axis=0)
+    alphas = jnp.ones(T).at[0].set(0.0)
+    d_scan = jnp.concatenate([jnp.ones((1, D)),     d_blocks[:-1]], axis=0)
+    U_scan = jnp.concatenate([jnp.zeros((1, D, m)), U_blocks[:-1]], axis=0)
+    V_scan = jnp.concatenate([jnp.zeros((1, D, m)), V_blocks[:-1]], axis=0)
     dvec   = -r
 
     if m >= 2 and compress == "rand":
@@ -288,18 +297,13 @@ def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iter
             vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec), reverse=False,
         )
-    return delta_s.astype(orig_dtype)
+    return delta_s
 
 
 # --- block-bidiagonal solve (sequential) ---
 
 def solve_rankk_bidiag_sequential(d_blocks, U_blocks, V_blocks, r):
     """Solve  B @ delta_s = -r  via lax.scan (sequential forward substitution)."""
-    orig_dtype = r.dtype
-    d_blocks = d_blocks.astype(jnp.float64)
-    U_blocks = U_blocks.astype(jnp.float64)
-    V_blocks = V_blocks.astype(jnp.float64)
-    r        = r.astype(jnp.float64)
 
     def step(delta_prev, inputs):
         r_t, d_t, U_t, V_t = inputs
@@ -310,7 +314,7 @@ def solve_rankk_bidiag_sequential(d_blocks, U_blocks, V_blocks, r):
     _, deltas_rest = lax.scan(
         step, delta_0, (r[1:], d_blocks[:-1], U_blocks[:-1], V_blocks[:-1])
     )
-    return jnp.concatenate([delta_0[None], deltas_rest], axis=0).astype(orig_dtype)
+    return jnp.concatenate([delta_0[None], deltas_rest], axis=0)
 
 
 # --- orthonormal basis helpers ---
