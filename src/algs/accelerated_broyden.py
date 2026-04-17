@@ -23,6 +23,7 @@ QR+SVD compression, or optionally via sequential forward substitution.
 
 from typing import Callable, Optional
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap, lax, jacfwd
@@ -261,17 +262,23 @@ def make_combine(m, compress="rand"):
 
 # --- block-bidiagonal solve (parallel) ---
 
-def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand"):
+def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iteration=0):
     """Solve  B @ delta_s = -r  via lax.associative_scan."""
+    orig_dtype = r.dtype
+    d_blocks = d_blocks.astype(jnp.float64)
+    U_blocks = U_blocks.astype(jnp.float64)
+    V_blocks = V_blocks.astype(jnp.float64)
+    r        = r.astype(jnp.float64)
+
     T, D = d_blocks.shape
-    alphas = jnp.ones(T).at[0].set(0.0)
-    d_scan = jnp.concatenate([jnp.ones((1, D)),     d_blocks[:-1]], axis=0)
-    U_scan = jnp.concatenate([jnp.zeros((1, D, m)), U_blocks[:-1]], axis=0)
-    V_scan = jnp.concatenate([jnp.zeros((1, D, m)), V_blocks[:-1]], axis=0)
+    alphas = jnp.ones(T, dtype=jnp.float64).at[0].set(0.0)
+    d_scan = jnp.concatenate([jnp.ones((1, D), dtype=jnp.float64),     d_blocks[:-1]], axis=0)
+    U_scan = jnp.concatenate([jnp.zeros((1, D, m), dtype=jnp.float64), U_blocks[:-1]], axis=0)
+    V_scan = jnp.concatenate([jnp.zeros((1, D, m), dtype=jnp.float64), V_blocks[:-1]], axis=0)
     dvec   = -r
 
     if m >= 2 and compress == "rand":
-        keys = jr.split(jr.PRNGKey(42), T)
+        keys = jr.split(jr.fold_in(jr.PRNGKey(42), iteration), T)
         _, _, _, _, delta_s, _ = lax.associative_scan(
             vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec, keys), reverse=False,
@@ -281,13 +288,19 @@ def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand"):
             vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec), reverse=False,
         )
-    return delta_s
+    return delta_s.astype(orig_dtype)
 
 
 # --- block-bidiagonal solve (sequential) ---
 
 def solve_rankk_bidiag_sequential(d_blocks, U_blocks, V_blocks, r):
     """Solve  B @ delta_s = -r  via lax.scan (sequential forward substitution)."""
+    orig_dtype = r.dtype
+    d_blocks = d_blocks.astype(jnp.float64)
+    U_blocks = U_blocks.astype(jnp.float64)
+    V_blocks = V_blocks.astype(jnp.float64)
+    r        = r.astype(jnp.float64)
+
     def step(delta_prev, inputs):
         r_t, d_t, U_t, V_t = inputs
         delta_t = -r_t - lrmat_apply(d_t, U_t, V_t, delta_prev)
@@ -297,7 +310,7 @@ def solve_rankk_bidiag_sequential(d_blocks, U_blocks, V_blocks, r):
     _, deltas_rest = lax.scan(
         step, delta_0, (r[1:], d_blocks[:-1], U_blocks[:-1], V_blocks[:-1])
     )
-    return jnp.concatenate([delta_0[None], deltas_rest], axis=0)
+    return jnp.concatenate([delta_0[None], deltas_rest], axis=0).astype(orig_dtype)
 
 
 # --- orthonormal basis helpers ---
@@ -362,6 +375,13 @@ def accelerated_broyden_deer_alg(
     Ts=None,
     reset: bool = True,
     tol: float = 5e-4,
+    window_size: Optional[int] = None,
+    window_tol: float = 1e-4,
+    window_rtol: float = 1e-3,
+    line_search: bool = False,
+    ls_max_backtracks: int = 10,
+    ls_c: float = 1e-4,
+    lower_bounds=None,
     key=None,
 ):
     """
@@ -441,7 +461,220 @@ def accelerated_broyden_deer_alg(
     target_window_init = jnp.zeros((T, m, D))
     gamma_init         = -jnp.ones(T)
 
-    # --- step function ---
+    # ===== sliding-window code path =====
+    if window_size is not None:
+        W = min(int(window_size), T)
+        wtol = float(window_tol)
+        wrtol = float(window_rtol)
+        D_drv = drivers.shape[1]
+        mem_count_init = jnp.zeros(T, dtype=jnp.int32)
+        front_init = jnp.int32(0)
+        s_idx_full = jnp.arange(T, dtype=jnp.int32)
+
+        if qmem_efficient:
+            raise NotImplementedError(
+                "qmem_efficient is not yet supported with window_size")
+        if full_trace:
+            raise NotImplementedError(
+                "full_trace is not yet supported with window_size")
+        if Ts is not None:
+            raise NotImplementedError(
+                "Ts is not yet supported with window_size")
+
+        def _step_win(carry, args):
+            (states, p_window, target_window, gamma_arr,
+             mem_count, front, is_nan, iteration) = carry
+
+            front_i = jnp.minimum(front, jnp.int32(T - W))
+            zi = jnp.int32(0)
+
+            y_init_win = jnp.where(
+                front_i > 0, states[front_i - 1], initial_state)
+
+            states_win = jax.lax.dynamic_slice(
+                states, (front_i, zi), (W, D))
+            drivers_win = jax.lax.dynamic_slice(
+                drivers, (front_i, zi), (W, D_drv))
+            pw_win = jax.lax.dynamic_slice(
+                p_window, (front_i, zi, zi), (W, m, D))
+            tw_win = jax.lax.dynamic_slice(
+                target_window, (front_i, zi, zi), (W, m, D))
+            mc_win = jax.lax.dynamic_slice(
+                mem_count, (front_i,), (W,))
+
+            r_old_win = get_residual(f, y_init_win, states_win, drivers_win)
+
+            if init == "rescaled_identity":
+                gamma_win = jax.lax.dynamic_slice(
+                    gamma_arr, (front_i,), (W,))
+                d_init_win = gamma_win[:, None] * jnp.ones((W, D))
+            else:
+                d_diag_win = compute_jac_diag(
+                    states_win[:-1], drivers_win[1:])
+                d_init_win = jnp.concatenate(
+                    [d_diag_win, jnp.ones((1, D))], axis=0)
+
+            if m == 1:
+                p_blk = pw_win[:-1, 0, :]
+                t_blk = tw_win[:-1, 0, :]
+
+                def compute_UV_w(d_t, step_t, target_t):
+                    v_t = step_t
+                    r_t = target_t - d_t * v_t
+                    denom = jnp.dot(v_t, v_t) + eps_gram
+                    u_t = (1 - k) * r_t / denom
+                    return u_t[:, None], v_t[:, None]
+
+                U_in, V_in = vmap(compute_UV_w)(
+                    d_init_win[:-1], p_blk, t_blk)
+            elif m == 2:
+                p_blk = pw_win[:-1]
+                t_blk = tw_win[:-1]
+
+                def compute_UV_w(d_t, steps_t, targets_t):
+                    V_t = steps_t.T
+                    R_t = targets_t.T - d_t[:, None] * V_t
+                    C_t = V_t.T @ V_t + eps_gram * jnp.eye(2)
+                    det = C_t[0, 0] * C_t[1, 1] - C_t[0, 1] * C_t[1, 0]
+                    inv_det = 1.0 / jnp.maximum(det, 1e-30)
+                    U_t = (1 - k) * inv_det * jnp.stack([
+                        R_t[:, 0] * C_t[1, 1] - R_t[:, 1] * C_t[0, 1],
+                        R_t[:, 1] * C_t[0, 0] - R_t[:, 0] * C_t[1, 0],
+                    ], axis=1)
+                    return U_t, V_t
+
+                U_in, V_in = vmap(compute_UV_w)(
+                    d_init_win[:-1], p_blk, t_blk)
+            else:
+                p_blk = pw_win[:-1]
+                t_blk = tw_win[:-1]
+
+                def compute_UV_w(d_t, steps_t, targets_t):
+                    V_t = steps_t.T
+                    R_t = targets_t.T - d_t[:, None] * V_t
+                    C_t = V_t.T @ V_t + eps_gram * jnp.eye(m)
+                    U_t = (1 - k) * jnp.linalg.solve(C_t, R_t.T).T
+                    return U_t, V_t
+
+                U_in, V_in = vmap(compute_UV_w)(
+                    d_init_win[:-1], p_blk, t_blk)
+
+            U_blk_win = jnp.concatenate(
+                [U_in, jnp.zeros((1, D, m))], axis=0)
+            V_blk_win = jnp.concatenate(
+                [V_in, jnp.zeros((1, D, m))], axis=0)
+
+            U_blk_win = jnp.where(
+                mc_win[:, None, None] == 0,
+                jnp.zeros_like(U_blk_win),
+                U_blk_win)
+
+            if sequential_solve:
+                delta_s_win = solve_rankk_bidiag_sequential(
+                    d_init_win, U_blk_win, V_blk_win, r_old_win)
+            else:
+                delta_s_win = solve_rankk_bidiag(
+                    d_init_win, U_blk_win, V_blk_win, r_old_win,
+                    m, compress=compress)
+
+            new_states_win = states_win + delta_s_win
+            is_nan = jnp.logical_or(
+                jnp.isnan(new_states_win).any(), is_nan)
+            if reset:
+                nan_mask_win = jnp.isnan(new_states_win)
+                guess_win = jax.lax.dynamic_slice(
+                    states_guess, (front_i, zi), (W, D))
+                new_states_win = jnp.where(
+                    nan_mask_win, guess_win, new_states_win)
+
+            states = jax.lax.dynamic_update_slice(
+                states, new_states_win, (front_i, zi))
+
+            r_new_win = get_residual(
+                f, y_init_win, new_states_win, drivers_win)
+            y_win = r_new_win - r_old_win
+            new_target_win = jnp.concatenate(
+                [y_win[1:] - delta_s_win[1:],
+                 jnp.zeros((1, D))], axis=0)
+
+            pw_win_new = jnp.concatenate(
+                [delta_s_win[:, None, :],
+                 pw_win[:, :-1, :]], axis=1)
+            tw_win_new = jnp.concatenate(
+                [new_target_win[:, None, :],
+                 tw_win[:, :-1, :]], axis=1)
+
+            p_window = jax.lax.dynamic_update_slice(
+                p_window, pw_win_new, (front_i, zi, zi))
+            target_window = jax.lax.dynamic_update_slice(
+                target_window, tw_win_new, (front_i, zi, zi))
+
+            mc_win_new = mc_win + jnp.int32(1)
+            mem_count = jax.lax.dynamic_update_slice(
+                mem_count, mc_win_new, (front_i,))
+
+            err = jnp.max(
+                jnp.abs(new_states_win - states_win)
+                - wrtol * jnp.abs(states_win),
+                axis=-1)
+            mask = err > wtol
+            first_violation = jnp.argmax(mask).astype(jnp.int32)
+            stride = jnp.where(
+                mask.any(), first_violation, jnp.int32(W))
+
+            front_new = front + stride
+
+            new_front_i = jnp.minimum(
+                front_new, jnp.int32(T - W))
+            src_idx = jnp.minimum(
+                front_i + jnp.int32(W) - 1,
+                jnp.int32(T - 1))
+            src = states[src_idx]
+            newly_active = (
+                (s_idx_full >= front_i + jnp.int32(W))
+                & (s_idx_full < new_front_i + jnp.int32(W)))
+            states = jnp.where(
+                newly_active[:, None], src[None, :], states)
+
+            if init == "rescaled_identity":
+                p_last = pw_win_new[:, 0, :]
+                tgt_last = tw_win_new[:, 0, :]
+                g_num = jnp.sum(p_last * tgt_last, axis=-1)
+                g_den = jnp.sum(p_last * p_last, axis=-1) + 1e-10
+                gamma_win_new = jnp.where(
+                    mc_win == 0, gamma_win, g_num / g_den)
+                gamma_arr = jax.lax.dynamic_update_slice(
+                    gamma_arr, gamma_win_new, (front_i,))
+
+            new_carry = (states, p_window, target_window, gamma_arr,
+                         mem_count, front_new, is_nan, iteration + 1)
+            return new_carry, None
+
+        def cond_func_win(state):
+            iiter, _, _, _, _, _, front, _ = state
+            return jnp.logical_and(front < T, iiter < num_iters)
+
+        def body_func_win(state):
+            (iiter, states, pw, tw, gam, mc, front, is_nan) = state
+            carry = (states, pw, tw, gam, mc, front, is_nan, iiter)
+            new_carry, _ = _step_win(carry, None)
+            (ns, pw_n, tw_n, gam_n, mc_n, fr_n, nan_n, _) = new_carry
+            return (iiter + 1, ns, pw_n, tw_n, gam_n,
+                    mc_n, fr_n, nan_n)
+
+        result = jax.lax.while_loop(
+            cond_func_win, body_func_win,
+            (jnp.int32(0), states_guess,
+             p_window_init, target_window_init, gamma_init,
+             mem_count_init, front_init, False))
+
+        newton_steps = result[0]
+        final_state = result[1]
+        is_nan = result[7]
+        return (None, final_state, newton_steps, is_nan,
+                None, None, None)
+
+    # --- step function (non-windowed) ---
     def _step(carry, args):
         states, p_window, target_window, gamma, is_nan, iteration = carry
 
@@ -509,17 +742,41 @@ def accelerated_broyden_deer_alg(
         if sequential_solve:
             delta_s = solve_rankk_bidiag_sequential(d_init, U_blocks, V_blocks, r_old)
         else:
-            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_blocks, r_old, m, compress=compress)
+            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_blocks, r_old, m, compress=compress, iteration=iteration)
 
-        # update states
+        # update states (full step first)
         new_states = states + delta_s
         is_nan = jnp.logical_or(jnp.isnan(new_states).any(), is_nan)
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
 
+        if lower_bounds is not None:
+            new_states = jnp.maximum(new_states, lower_bounds)
+
         # new residuals for secant update
         r_new = get_residual(f, initial_state, new_states, drivers)
+
+        # NaN damping: if new states or residual have NaN, retry with damped step
+        if line_search:
+            has_nan = jnp.logical_or(
+                jnp.isnan(new_states).any(), jnp.isnan(r_new).any())
+
+            def _damp(_):
+                cand = states + ls_c * delta_s
+                cand = jnp.where(jnp.isnan(cand), states_guess, cand)
+                if lower_bounds is not None:
+                    cand = jnp.maximum(cand, lower_bounds)
+                r_cand = get_residual(f, initial_state, cand, drivers)
+                return cand, r_cand
+
+            def _keep(_):
+                return new_states, r_new
+
+            new_states, r_new = lax.cond(has_nan, _damp, _keep, None)
+            delta_s = new_states - states
+            is_nan = jnp.logical_or(jnp.isnan(new_states).any(), is_nan)
+            nan_mask = jnp.isnan(new_states)
 
         # update secant windows
         y          = r_new - r_old
