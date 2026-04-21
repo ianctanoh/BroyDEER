@@ -24,6 +24,7 @@ from jax import vmap, lax, jacfwd
 from jax.lax import scan
 
 from .deer import get_residual, merit_fxn, quasi_diag_estimator
+from .accelerated_broyden import lrmat_compose_rand
 
 
 # --- low-rank matrix operations ---
@@ -69,16 +70,32 @@ def lrmat_compose(d_a, U_a, V_a, d_b, U_b, V_b, m):
 
 # --- combination for associative scan ---
 
-def make_combine(m):
-    """Return a combine function for lax.associative_scan."""
-    def combine(elem_a, elem_b):
-        alpha_a, d_a, U_a, V_a, dvec_a = elem_a
-        alpha_b, d_b, U_b, V_b, dvec_b = elem_b
+def make_combine(m, compress="qr_svd"):
+    """Return a combine function for lax.associative_scan.
 
-        alpha_new            = alpha_a * alpha_b
-        d_new, U_new, V_new  = lrmat_compose(d_a, U_a, V_a, d_b, U_b, V_b, m)
-        dvec_new             = -alpha_b * lrmat_apply(d_b, U_b, V_b, dvec_a) + dvec_b
-        return alpha_new, d_new, U_new, V_new, dvec_new
+    compress: "qr_svd" — LAPACK QR + SVD on (D, 2m) (exact, reference path)
+              "rand"   — randomized range finder (no SVD, GPU-friendly);
+                         requires m >= 2 and a PRNG key carried per element.
+    """
+    if m >= 2 and compress == "rand":
+        def combine(elem_a, elem_b):
+            alpha_a, d_a, U_a, V_a, dvec_a, key_a = elem_a
+            alpha_b, d_b, U_b, V_b, dvec_b, key_b = elem_b
+            alpha_new           = alpha_a * alpha_b
+            subkey, new_key     = jr.split(key_a)
+            d_new, U_new, V_new = lrmat_compose_rand(
+                d_a, U_a, V_a, d_b, U_b, V_b, m, subkey)
+            dvec_new            = -alpha_b * lrmat_apply(d_b, U_b, V_b, dvec_a) + dvec_b
+            return alpha_new, d_new, U_new, V_new, dvec_new, new_key
+    else:
+        def combine(elem_a, elem_b):
+            alpha_a, d_a, U_a, V_a, dvec_a = elem_a
+            alpha_b, d_b, U_b, V_b, dvec_b = elem_b
+
+            alpha_new            = alpha_a * alpha_b
+            d_new, U_new, V_new  = lrmat_compose(d_a, U_a, V_a, d_b, U_b, V_b, m)
+            dvec_new             = -alpha_b * lrmat_apply(d_b, U_b, V_b, dvec_a) + dvec_b
+            return alpha_new, d_new, U_new, V_new, dvec_new
     return combine
 
 
@@ -110,10 +127,14 @@ def diagonal_solve(d_blocks, r):
 
 # --- solve one Newton step ---
 
-def broyden_solve(d_blocks, U_blocks, V_blocks, r):
+def broyden_solve(d_blocks, U_blocks, V_blocks, r, compress="qr_svd", iteration=0):
     """
     Solve  B @ delta_s = -r  where B is block-bidiagonal with subdiagonal blocks
         b_t = diag(d_blocks[t]) + U_blocks[t] V_blocks[t]^T.
+
+    compress: "qr_svd" (default) or "rand". The "rand" path uses a randomized
+    range finder (requires m >= 2) and draws fresh Gaussian sketches per
+    outer iteration via fold_in(PRNGKey(42), iteration).
     """
     T, _, m = U_blocks.shape
 
@@ -123,10 +144,18 @@ def broyden_solve(d_blocks, U_blocks, V_blocks, r):
     V_scan    = jnp.concatenate([jnp.zeros_like(V_blocks[:1]), V_blocks[:-1]], axis=0)
     dvec_scan = -r
 
-    combine = make_combine(m)
-    _, _, _, _, delta_s = lax.associative_scan(
-        vmap(combine), (alphas, d_scan, U_scan, V_scan, dvec_scan), reverse=False
-    )
+    combine = make_combine(m, compress=compress)
+    if m >= 2 and compress == "rand":
+        keys = jr.split(jr.fold_in(jr.PRNGKey(42), iteration), T)
+        _, _, _, _, delta_s, _ = lax.associative_scan(
+            vmap(combine),
+            (alphas, d_scan, U_scan, V_scan, dvec_scan, keys),
+            reverse=False,
+        )
+    else:
+        _, _, _, _, delta_s = lax.associative_scan(
+            vmap(combine), (alphas, d_scan, U_scan, V_scan, dvec_scan), reverse=False
+        )
     return delta_s
 
 
@@ -257,6 +286,10 @@ def broyden_deer_alg(
     reset: bool = True,
     tol: float = 5e-4,
     key=None,
+    lower_bounds=None,
+    compress: str = "qr_svd",
+    line_search: bool = False,
+    ls_c: float = 1e-4,
 ):
     """
     Broyden-DEER: parallel Newton solver with limited-memory Broyden Jacobian blocks.
@@ -280,7 +313,6 @@ def broyden_deer_alg(
                            "jac"               -- d_t = -diag(df/dx) at initial guess
                            "identity"          -- d_t = -gamma * I (fixed)
                            "rescaled_identity" -- d_t = -I; gamma rescaled each iteration
-                           "low_rank"          -- d_t = 0; U, V from top-m SVD of -df/dx
                            "fresh_jac"         -- d_t recomputed at current X every iteration
         gamma          : scaling for identity/rescaled_identity init (default 1.0)
         qmem_efficient : if True, use Hutchinson estimator for Jacobian diagonal
@@ -291,15 +323,22 @@ def broyden_deer_alg(
         reset          : if True, replace NaN states with states_guess
         tol            : convergence tolerance (on merit function)
         key            : PRNG key for Hutchinson estimator
+        lower_bounds   : optional per-dim lower clip applied after each step
+        compress       : "qr_svd" (default) or "rand". "rand" uses a randomized
+                         range finder in the associative_scan composition
+                         (requires m >= 2), matching accelerated_broyden.
+        line_search    : if True, damp the Newton step with ls_c when the update
+                         is non-finite or raises the merit more than 10x
+        ls_c           : damping factor used when the line-search guard triggers
 
     Returns:
         7-tuple matching deer_alg:
         (all_states, final_state, newton_steps, is_nan, nan_mask, all_newtons, mf_val)
     """
-    if init not in ("jac", "identity", "rescaled_identity", "low_rank", "fresh_jac"):
+    if init not in ("jac", "identity", "rescaled_identity", "fresh_jac"):
         raise ValueError(
             f"init must be 'jac', 'identity', 'rescaled_identity', "
-            f"'low_rank', or 'fresh_jac', got {init!r}"
+            f"or 'fresh_jac', got {init!r}"
         )
 
     T, D = states_guess.shape
@@ -328,23 +367,6 @@ def broyden_deer_alg(
     if init == "jac":
         d_diag = compute_jac_diag(states_guess[:-1], drivers[1:])
         d_init = jnp.concatenate([d_diag, jnp.ones((1, D))], axis=0)
-    elif init == "low_rank":
-        if m == 0:
-            raise ValueError("init='low_rank' requires m >= 1")
-        # low_rank always needs full Jacobians for SVD initialization
-        jacs = vmap(jacfwd(f))(states_guess[:-1], drivers[1:])
-        A = -jacs
-        d_diag = jnp.zeros((len(A), D))
-
-        def svd_init_block(A_t):
-            U_t, s_t, Vt_t = jnp.linalg.svd(A_t, full_matrices=False)
-            sh = jnp.sqrt(jnp.abs(s_t[:m]))
-            return U_t[:, :m] * sh, Vt_t[:m, :].T * sh
-
-        U_inner, V_inner = vmap(svd_init_block)(A)
-        U_init = jnp.concatenate([U_inner, jnp.zeros((1, D, max(m, 1)))], axis=0)
-        V_init = jnp.concatenate([V_inner, jnp.zeros((1, D, max(m, 1)))], axis=0)
-        d_init = jnp.concatenate([d_diag, jnp.zeros((1, D))], axis=0)
     elif init == "fresh_jac":
         d_init = jnp.ones((T, D))
     elif init == "identity":
@@ -352,9 +374,8 @@ def broyden_deer_alg(
     else:  # "rescaled_identity"
         d_init = -jnp.ones((T, D))
 
-    if init != "low_rank":
-        U_init = jnp.zeros((T, D, max(m, 1)))
-        V_init = jnp.zeros((T, D, max(m, 1)))
+    U_init = jnp.zeros((T, D, max(m, 1)))
+    V_init = jnp.zeros((T, D, max(m, 1)))
     gamma_init = jnp.ones(T)
 
     # --- step function ---
@@ -376,7 +397,8 @@ def broyden_deer_alg(
         if use_lrmat:
             delta_s = (sequential_broyden_solve(d_eff, U, V, r_old)
                        if sequential_solve else
-                       broyden_solve(d_eff, U, V, r_old))
+                       broyden_solve(d_eff, U, V, r_old,
+                                     compress=compress, iteration=iteration))
         else:
             delta_s = (sequential_diagonal_solve(d_eff, r_old)
                        if sequential_solve else
@@ -388,9 +410,45 @@ def broyden_deer_alg(
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
+        if lower_bounds is not None:
+            new_states = jnp.maximum(new_states, lower_bounds)
 
         # new residuals for Broyden update
         r_new = get_residual(f, initial_state, new_states, drivers)
+
+        # backtracking line search: damp if non-finite OR merit jumped >10x
+        if line_search:
+            def _merit_from_r(r):
+                r2 = jnp.where(jnp.isfinite(r), r**2, jnp.inf)
+                return 0.5 * jnp.sum(jnp.cumsum(r2, axis=0), axis=1)[-1]
+
+            merit_old = _merit_from_r(r_old)
+            merit_new = _merit_from_r(r_new)
+
+            bad = jnp.logical_or(
+                jnp.logical_or(
+                    (~jnp.isfinite(new_states)).any(),
+                    (~jnp.isfinite(r_new)).any(),
+                ),
+                merit_new > 10.0 * merit_old,
+            )
+
+            def _damp(_):
+                cand = states + ls_c * delta_s
+                cand = jnp.where(~jnp.isfinite(cand), states_guess, cand)
+                if lower_bounds is not None:
+                    cand = jnp.maximum(cand, lower_bounds)
+                r_cand = get_residual(f, initial_state, cand, drivers)
+                return cand, r_cand
+
+            def _keep(_):
+                return new_states, r_new
+
+            new_states, r_new = lax.cond(bad, _damp, _keep, None)
+            delta_s = new_states - states
+            bad_mask = ~jnp.isfinite(new_states)
+            is_nan = jnp.logical_or(bad_mask.any(), is_nan)
+            nan_mask = bad_mask
 
         # update Broyden blocks
         if init == "fresh_jac":
@@ -406,12 +464,13 @@ def broyden_deer_alg(
                 U_new, V_new = update_all_blocks(d_eff_update, U, V, delta_s, r_old, r_new, k)
             else:
                 U_new, V_new = U, V
-        else:
+        else:  # "identity"
             if use_lrmat:
                 U_new, V_new = update_all_blocks(d_eff, U, V, delta_s, r_old, r_new, k)
             else:
                 U_new, V_new = U, V
-            gamma_new = update_gamma(gamma, delta_s, r_old, r_new, m, iteration, d_init)
+            # keep the user-supplied gamma constant — no secant rescaling
+            gamma_new = gamma
 
         mf_val = merit_fxn(f, initial_state, states, drivers)
         return (new_states, U_new, V_new, gamma_new, is_nan, iteration + 1), (new_states, nan_mask, mf_val)

@@ -750,8 +750,9 @@ def accelerated_broyden_deer_alg(
 
         # update states (full step first)
         new_states = states + delta_s
-        is_nan = jnp.logical_or(jnp.isnan(new_states).any(), is_nan)
-        nan_mask = jnp.isnan(new_states)
+        bad_mask = ~jnp.isfinite(new_states)
+        is_nan = jnp.logical_or(bad_mask.any(), is_nan)
+        nan_mask = bad_mask
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
 
@@ -761,14 +762,25 @@ def accelerated_broyden_deer_alg(
         # new residuals for secant update
         r_new = get_residual(f, initial_state, new_states, drivers)
 
-        # NaN damping: if new states or residual have NaN, retry with damped step
+        # backtracking line search: damp if non-finite OR merit increased
         if line_search:
-            has_nan = jnp.logical_or(
-                jnp.isnan(new_states).any(), jnp.isnan(r_new).any())
+            def _merit_from_r(r):
+                r2 = jnp.where(jnp.isfinite(r), r**2, jnp.inf)
+                return 0.5 * jnp.sum(jnp.cumsum(r2, axis=0), axis=1)[-1]
+
+            merit_old = _merit_from_r(r_old)
+            merit_new = _merit_from_r(r_new)
+
+            bad = jnp.logical_or(
+                jnp.logical_or(
+                    (~jnp.isfinite(new_states)).any(),
+                    (~jnp.isfinite(r_new)).any()),
+                merit_new > 10.0 * merit_old,
+            )
 
             def _damp(_):
                 cand = states + ls_c * delta_s
-                cand = jnp.where(jnp.isnan(cand), states_guess, cand)
+                cand = jnp.where(~jnp.isfinite(cand), states_guess, cand)
                 if lower_bounds is not None:
                     cand = jnp.maximum(cand, lower_bounds)
                 r_cand = get_residual(f, initial_state, cand, drivers)
@@ -777,10 +789,11 @@ def accelerated_broyden_deer_alg(
             def _keep(_):
                 return new_states, r_new
 
-            new_states, r_new = lax.cond(has_nan, _damp, _keep, None)
+            new_states, r_new = lax.cond(bad, _damp, _keep, None)
             delta_s = new_states - states
-            is_nan = jnp.logical_or(jnp.isnan(new_states).any(), is_nan)
-            nan_mask = jnp.isnan(new_states)
+            bad_mask = ~jnp.isfinite(new_states)
+            is_nan = jnp.logical_or(bad_mask.any(), is_nan)
+            nan_mask = bad_mask
 
         # update secant windows
         y          = r_new - r_old
@@ -860,6 +873,10 @@ def accelerated_broyden_deer_alg(
         all_newtons = newton_steps - iters_below + 1
     else:
         all_newtons = None
+
+    # is_nan reflects the *final* result, not transient blowups that reset recovered
+    is_nan = (~jnp.isfinite(final_state)).any()
+
     return (
         all_states,
         final_state,
@@ -1088,6 +1105,10 @@ def accelerated_broyden_deer_alg_ortho(
         all_newtons = newton_steps - iters_below + 1
     else:
         all_newtons = None
+
+    # is_nan reflects the *final* result, not transient blowups that reset recovered
+    is_nan = (~jnp.isfinite(final_state)).any()
+
     return (
         all_states,
         final_state,
