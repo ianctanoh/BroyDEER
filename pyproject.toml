@@ -22,6 +22,16 @@ dependencies = [
     "packaging",
     "seaborn",
     "tensorflow-probability[jax]>=0.25.0",
+    "numpy",
+    "pandas",
+]
+
+[project.optional-dependencies]
+# DiT / DDIM diffusion experiments (VAE decoding and LPIPS run in PyTorch)
+dit = [
+    "torch",
+    "diffusers",
+    "lpips",
 ]
 
 [tool.setuptools]

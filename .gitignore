@@ -14,3 +14,7 @@ outputs/
 experiments/multirun/
 experiments/saved_files/
 figs/
+
+# Slurm job logs
+*.out
+*.err
