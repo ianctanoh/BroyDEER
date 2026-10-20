@@ -28,6 +28,8 @@ import jax.random as jr
 from jax import vmap, lax, jacfwd
 from jax.lax import scan
 
+from .scan_trees import get_scan_fn
+
 from .deer import get_residual, merit_fxn, quasi_diag_estimator
 
 
@@ -277,8 +279,13 @@ def make_combine(m, compress="rand"):
 
 # --- block-bidiagonal solve (parallel) ---
 
-def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iteration=0):
-    """Solve  B @ delta_s = -r  via lax.associative_scan."""
+def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iteration=0, scan_tree="blelloch"):
+    """Solve  B @ delta_s = -r  via an associative scan.
+
+    scan_tree: "blelloch" (default, matches jax.lax.associative_scan) or
+    "hillis_steele" — different tree topology for combining the same
+    (approximately associative, under compression) blocks.
+    """
     T, D = d_blocks.shape
     alphas = jnp.ones(T).at[0].set(0.0)
     d_scan = jnp.concatenate([jnp.ones((1, D)),     d_blocks[:-1]], axis=0)
@@ -286,14 +293,15 @@ def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iter
     V_scan = jnp.concatenate([jnp.zeros((1, D, m)), V_blocks[:-1]], axis=0)
     dvec   = -r
 
+    scan_fn = get_scan_fn(scan_tree)
     if m >= 2 and compress == "rand":
         keys = jr.split(jr.fold_in(jr.PRNGKey(42), iteration), T)
-        _, _, _, _, delta_s, _ = lax.associative_scan(
+        _, _, _, _, delta_s, _ = scan_fn(
             vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec, keys), reverse=False,
         )
     else:
-        _, _, _, _, delta_s = lax.associative_scan(
+        _, _, _, _, delta_s = scan_fn(
             vmap(make_combine(m, compress=compress)),
             (alphas, d_scan, U_scan, V_scan, dvec), reverse=False,
         )
@@ -378,7 +386,7 @@ def accelerated_broyden_deer_alg(
     full_trace: bool = False,
     Ts=None,
     reset: bool = True,
-    tol: float = 5e-4,
+    tol: float = 1e-4,
     window_size: Optional[int] = None,
     window_tol: float = 1e-4,
     window_rtol: float = 1e-3,
@@ -387,6 +395,7 @@ def accelerated_broyden_deer_alg(
     ls_c: float = 1e-4,
     lower_bounds=None,
     key=None,
+    scan_tree: str = "blelloch",
 ):
     """
     Accelerated Broyden DEER: fresh diagonal + rank-m secant correction.
@@ -579,7 +588,7 @@ def accelerated_broyden_deer_alg(
             else:
                 delta_s_win = solve_rankk_bidiag(
                     d_init_win, U_blk_win, V_blk_win, r_old_win,
-                    m, compress=compress)
+                    m, compress=compress, scan_tree=scan_tree)
 
             new_states_win = states_win + delta_s_win
             is_nan = jnp.logical_or(
@@ -682,7 +691,7 @@ def accelerated_broyden_deer_alg(
     def _step(carry, args):
         states, p_window, target_window, gamma, is_nan, iteration = carry
 
-        # residuals
+        # compute residual (1 vmap of f)
         r_old = get_residual(f, initial_state, states, drivers)
 
         # compute diagonal
@@ -746,7 +755,7 @@ def accelerated_broyden_deer_alg(
         if sequential_solve:
             delta_s = solve_rankk_bidiag_sequential(d_init, U_blocks, V_blocks, r_old)
         else:
-            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_blocks, r_old, m, compress=compress, iteration=iteration)
+            delta_s = solve_rankk_bidiag(d_init, U_blocks, V_blocks, r_old, m, compress=compress, iteration=iteration, scan_tree=scan_tree)
 
         # update states (full step first)
         new_states = states + delta_s
@@ -811,8 +820,12 @@ def accelerated_broyden_deer_alg(
         gamma_den = jnp.sum(p_last * p_last,   axis=-1) + 1e-10
         gamma_new = jnp.where(iteration == 0, gamma, gamma_num / gamma_den)
 
-        mf_val = merit_fxn(f, initial_state, states, drivers)
-        return (new_states, p_window_new, target_window_new, gamma_new, is_nan, iteration + 1), \
+        # stopping criterion: ||r||_2 / sqrt(T*D)
+        mf_val = jnp.sqrt(jnp.mean(r_old ** 2))
+        mf_val = jnp.where(jnp.isnan(mf_val), jnp.inf, mf_val)
+
+        return (new_states, p_window_new, target_window_new, gamma_new,
+                is_nan, iteration + 1), \
                (new_states, nan_mask, mf_val)
 
     # --- convergence loop ---
@@ -822,20 +835,32 @@ def accelerated_broyden_deer_alg(
 
     def body_func_single(iter_inp):
         iter_idx, states, pw, tw, gamma, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, pw, tw, gamma, is_nan_, iter_idx), None)
+        step_output, step_aux = _step(
+            (states, pw, tw, gamma, is_nan_, iter_idx), None
+        )
         new_states, pw_new, tw_new, gamma_new, is_nan, _ = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, pw_new, tw_new, gamma_new, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return (iter_idx + 1, new_states, pw_new, tw_new, gamma_new,
+                mf_val, is_nan, None)
 
     def body_func_multiple(iter_inp):
         iter_idx, states, pw, tw, gamma, _, is_nan_, iters_below = iter_inp
-        step_output, _ = _step((states, pw, tw, gamma, is_nan_, iter_idx), None)
+        step_output, step_aux = _step(
+            (states, pw, tw, gamma, is_nan_, iter_idx), None
+        )
         new_states, pw_new, tw_new, gamma_new, is_nan, _ = step_output
         new_errs = merit_fxn(f, initial_state, states, drivers, Ts=Ts)
         iters_below = iters_below + (new_errs < tol).astype(int)
-        return iter_idx + 1, new_states, pw_new, tw_new, gamma_new, new_errs[-1], is_nan, iters_below
+        return (iter_idx + 1, new_states, pw_new, tw_new, gamma_new,
+                new_errs[-1], is_nan, iters_below)
 
-    init_carry = (states_guess, p_window_init, target_window_init, gamma_init, False, 0)
+    init_carry = (states_guess, p_window_init, target_window_init, gamma_init,
+                  False, 0)
+
+    # initial stopping criterion: ||r||_2 / sqrt(T*D)
+    r_init = get_residual(f, initial_state, states_guess, drivers)
+    merit_init = jnp.sqrt(jnp.mean(r_init ** 2))
+    merit_init = jnp.where(jnp.isnan(merit_init), jnp.inf, merit_init)
 
     if full_trace:
         last_output, all_outputs = scan(
@@ -851,7 +876,7 @@ def accelerated_broyden_deer_alg(
             cond_func,
             body_func_multiple,
             (0, states_guess, p_window_init, target_window_init, gamma_init,
-             merit_fxn(f, initial_state, states_guess, drivers),
+             merit_init,
              False, jnp.zeros_like(Ts)),
         )
         newton_steps, final_state = result[0], result[1]
@@ -862,7 +887,7 @@ def accelerated_broyden_deer_alg(
             cond_func,
             body_func_single,
             (0, states_guess, p_window_init, target_window_init, gamma_init,
-             merit_fxn(f, initial_state, states_guess, drivers),
+             merit_init,
              False, None),
         )
         newton_steps, final_state = result[0], result[1]
@@ -907,7 +932,7 @@ def accelerated_broyden_deer_alg_ortho(
     full_trace: bool = False,
     Ts=None,
     reset: bool = True,
-    tol: float = 5e-4,
+    tol: float = 1e-4,
     key=None,
 ):
     """

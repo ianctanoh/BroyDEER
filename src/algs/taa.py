@@ -189,16 +189,16 @@ def taa_alg(
 
     def body_func_single(iter_inp):
         iter_idx, states, sm, rm, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, sm, rm, is_nan_, iter_idx), None)
+        step_output, step_aux = _step((states, sm, rm, is_nan_, iter_idx), None)
         new_states, sm_new, rm_new, is_nan, _ = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, sm_new, rm_new, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, sm_new, rm_new, mf_val, is_nan, None
 
     def body_func_multiple(iter_inp):
         iter_idx, states, sm, rm, _, is_nan_, iters_below = iter_inp
         step_output, _ = _step((states, sm, rm, is_nan_, iter_idx), None)
         new_states, sm_new, rm_new, is_nan, _ = step_output
-        new_errs = merit_fxn(f, initial_state, states, drivers, Ts=Ts)
+        new_errs = merit_fxn(f, initial_state, new_states, drivers, Ts=Ts)
         iters_below = iters_below + (new_errs < tol).astype(int)
         return iter_idx + 1, new_states, sm_new, rm_new, new_errs[-1], is_nan, iters_below
 
@@ -775,10 +775,10 @@ def taa_ddim_alg(
 
     def body_func_single(iter_inp):
         iter_idx, states, sm, rm, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, sm, rm, is_nan_, iter_idx), None)
+        step_output, step_aux = _step((states, sm, rm, is_nan_, iter_idx), None)
         new_states, sm_new, rm_new, is_nan, _ = step_output
-        new_err = merit_fxn(f_local, initial_state, states, drivers)
-        return iter_idx + 1, new_states, sm_new, rm_new, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, sm_new, rm_new, mf_val, is_nan, None
 
     def body_func_multiple(iter_inp):
         iter_idx, states, sm, rm, _, is_nan_, iters_below = iter_inp

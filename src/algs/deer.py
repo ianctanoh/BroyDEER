@@ -171,6 +171,12 @@ def merit_fxn(f: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray],
         return Ls[-1]
 
 
+def stopping_criterion(r):
+    """Compute ||r||_2 / sqrt(T*D) = sqrt(mean(r^2)) for convergence check."""
+    val = jnp.sqrt(jnp.mean(r ** 2))
+    return jnp.where(jnp.isnan(val), jnp.inf, val)
+
+
 def quasi_diag_estimator(state, inputs, deer_jvp, key, num_samples=1):
     z_rad = jr.rademacher(key, (num_samples, state.shape[0])).astype(float)
     vmap_jvp = jax.vmap(deer_jvp, in_axes=(None, None, 0))
@@ -192,7 +198,7 @@ def gauss_seidel_alg(
     num_iters,
     full_trace=False,
     reset=True,
-    tol=5e-4,
+    tol=1e-4,
     chunk_size=1,
 ):
     """
@@ -222,15 +228,15 @@ def gauss_seidel_alg(
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, states, drivers)
+        mf_val = merit_fxn(f, initial_state, new_states, drivers)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 
     def body_func_single(iter_inp):
         iter_idx, states, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, is_nan_), None)
+        step_output, step_aux = _step((states, is_nan_), None)
         new_states, is_nan = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, mf_val, is_nan, None
 
     def cond_func(iter_inp):
         iter_idx, _, err, *_ = iter_inp
@@ -271,7 +277,7 @@ def jacobi_alg(
     num_iters,
     full_trace=False,
     reset=True,
-    tol=5e-4,
+    tol=1e-4,
 ):
     """
     Jacobi iteration.
@@ -287,15 +293,15 @@ def jacobi_alg(
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, states, drivers)
+        mf_val = merit_fxn(f, initial_state, new_states, drivers)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 
     def body_func_single(iter_inp):
         iter_idx, states, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, is_nan_), None)
+        step_output, step_aux = _step((states, is_nan_), None)
         new_states, is_nan = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, mf_val, is_nan, None
 
     def cond_func(iter_inp):
         iter_idx, _, err, *_ = iter_inp
@@ -334,7 +340,7 @@ def guo_alg(
     num_iters,
     full_trace=False,
     reset=True,
-    tol=5e-4,
+    tol=1e-4,
 ):
     """
     Guo iteration: Jacobi + JVP correction.
@@ -355,15 +361,15 @@ def guo_alg(
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, states, drivers)
+        mf_val = merit_fxn(f, initial_state, new_states, drivers)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 
     def body_func_single(iter_inp):
         iter_idx, states, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, is_nan_), None)
+        step_output, step_aux = _step((states, is_nan_), None)
         new_states, is_nan = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, mf_val, is_nan, None
 
     def cond_func(iter_inp):
         iter_idx, _, err, *_ = iter_inp
@@ -420,15 +426,15 @@ def picard_alg(f,
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, states, drivers)
+        mf_val = merit_fxn(f, initial_state, new_states, drivers)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 
     def body_func_single(iter_inp):
         iter_idx, states, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, is_nan_), None)
+        step_output, step_aux = _step((states, is_nan_), None)
         new_states, is_nan = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, mf_val, is_nan, None
 
     def cond_func(iter_inp):
         iter_idx, _, err, *_ = iter_inp
@@ -468,6 +474,7 @@ def deer_alg(
     quasi: bool = False,
     diagonal_func: Optional[Callable] = None,
     qmem_efficient: bool = False,
+    num_samples: int = 1,
     k: Optional[float] = 0.0,
     clip: bool = False,
     full_trace: bool = False,
@@ -475,6 +482,7 @@ def deer_alg(
     reset: bool = False,
     tol: Optional[float] = 5e-4,
     key: Optional[jnp.ndarray] = None,
+    stopping: str = "merit",
 ):
     """
     DEER iteration: fixed-point solver for trajectories x_{1:T}.
@@ -506,7 +514,7 @@ def deer_alg(
         nan_jac_idx = False
         if quasi:
             if qmem_efficient:
-                As = vmap(quasi_diag_estimator, in_axes=(0, 0, None, 0))(states[:-1], drivers[1:], deer_jvp, keys)
+                As = vmap(quasi_diag_estimator, in_axes=(0, 0, None, 0, None))(states[:-1], drivers[1:], deer_jvp, keys, num_samples)
             elif diagonal_func:
                 As = vmap(diagonal_func)(states[:-1], drivers[1:])
             else:
@@ -548,8 +556,19 @@ def deer_alg(
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, states, drivers)
+        if stopping == "rms":
+            r = get_residual(f, initial_state, new_states, drivers)
+            mf_val = stopping_criterion(r)
+        else:
+            mf_val = merit_fxn(f, initial_state, new_states, drivers)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
+
+    def _init_err():
+        if stopping == "rms":
+            r_init = get_residual(f, initial_state, states_guess, drivers)
+            return stopping_criterion(r_init)
+        else:
+            return merit_fxn(f, initial_state, states_guess, drivers)
 
     def cond_func(iter_inp):
         iter_idx, _, err, *_ = iter_inp
@@ -557,10 +576,10 @@ def deer_alg(
 
     def body_func_single(iter_inp):
         iter_idx, states, _, is_nan_, _ = iter_inp
-        step_output, _ = _step((states, is_nan_), None)
+        step_output, step_aux = _step((states, is_nan_), None)
         new_states, is_nan = step_output
-        new_err = merit_fxn(f, initial_state, states, drivers)
-        return iter_idx + 1, new_states, new_err, is_nan, None
+        _, _, mf_val = step_aux
+        return iter_idx + 1, new_states, mf_val, is_nan, None
 
     def body_func_multiple(iter_inp):
         iter_idx, states, _, is_nan_, iters_below = iter_inp
@@ -598,7 +617,7 @@ def deer_alg(
             (
                 0,
                 states_guess,
-                merit_fxn(f, initial_state, states_guess, drivers),
+                _init_err(),
                 False,
                 None,
             ),

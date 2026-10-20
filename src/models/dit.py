@@ -673,6 +673,89 @@ def make_dit_diffusion(
     return deer_fxn, dynamics, x0, drivers, params
 
 
+def make_dit_diffusion_reusable(
+    checkpoint_path,
+    T=100,
+    cfg_scale=4.0,
+    eta=0.0,
+    seed=0,
+    latent_size=32,
+    use_fp16=False,
+):
+    """
+    Build class-independent DiT dynamics. Call `set_class(class_label)` to
+    switch conditioning without recompilation.
+
+    Returns
+    -------
+    set_class : callable(int) → (dynamics, x0, drivers)
+        Swaps class label in the eps_model. Since y_cond is a traced pytree
+        leaf, JAX reuses the same compiled XLA program for all classes.
+    params    : dict with extra info
+    """
+    from dynamics.diffusion import build_ddim_coeffs, DDIMDynamics
+
+    C, H, W = 4, latent_size, latent_size
+    D = C * H * W
+
+    # --- 1. model ---
+    key = jr.PRNGKey(seed)
+    k_model, k_noise = jr.split(key)
+    model = DiT_XL_2(input_size=latent_size, num_classes=1000, key=k_model)
+    model = load_dit_weights(model, checkpoint_path)
+    if use_fp16:
+        model = jax.tree.map(
+            lambda x: x.astype(jnp.float16) if eqx.is_array(x) and jnp.issubdtype(x.dtype, jnp.floating) else x,
+            model,
+        )
+
+    # --- 2. noise schedule ---
+    alpha_bar, timestep_map = dit_noise_schedule(T)
+    coef_x, coef_eps, coef_noise, noise_thr = build_ddim_coeffs(alpha_bar, eta=eta)
+
+    # --- 3. build a template CfgEpsModel with dummy class ---
+    eps_fn_template = CfgEpsModel(
+        model=model,
+        timestep_map=timestep_map,
+        y_cond=jnp.int32(0),
+        null_label=jnp.int32(model.y_embedder.num_classes),
+        cfg_scale=float(cfg_scale),
+        C=C, H=latent_size, W=latent_size,
+    )
+
+    # --- 4. initial state + drivers (class-independent for DDIM with eta=0) ---
+    noise_keys = jr.split(k_noise, T + 1)
+    noise_vecs = jnp.stack(
+        [jr.normal(noise_keys[i], (D,)) for i in range(T + 1)]
+    )
+    x0 = noise_vecs[-1]
+    t_per_s = (T - jnp.arange(T)).astype(jnp.float32)
+    drivers = jnp.concatenate([noise_vecs[:T], t_per_s[:, None]], axis=1)
+
+    params = {
+        "timestep_map": timestep_map,
+        "alpha_bar": alpha_bar,
+        "latent_shape": (C, H, W),
+    }
+
+    def set_class(class_label):
+        """Swap class label — same pytree structure, JAX won't recompile."""
+        eps_fn = eqx.tree_at(
+            lambda m: m.y_cond, eps_fn_template, jnp.int32(class_label)
+        )
+        dynamics = DDIMDynamics(
+            D=D, T=T,
+            eps_model=eps_fn,
+            coef_x=coef_x,
+            coef_eps=coef_eps,
+            coef_noise=coef_noise,
+            noise_thr=noise_thr,
+        )
+        return dynamics, x0, drivers
+
+    return set_class, params
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  VAE decoder  (PyTorch — only used for final visualization)
 # ═══════════════════════════════════════════════════════════════════════
