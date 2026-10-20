@@ -5,7 +5,7 @@ Same as harness_rnn_compress.py but compares associative-scan tree topology
 Broyden-DEER and Accelerated Broyden.
 
 scan_tree options: "blelloch", "hillis_steele"
-acc_compress is held fixed (not swept) -- see sweep_rnn_tree_rebuttals.yaml.
+acc_compress is held fixed (not swept) -- see sweep_rnn_A_scan_tree.yaml.
 
 Usage:
   python harness_rnn_scan.py alg=accelerated_broyden scan_tree=hillis_steele N=100 T=100000
@@ -29,7 +29,7 @@ from algs.broyden_deer import broyden_deer_alg
 from algs.accelerated_broyden import accelerated_broyden_deer_alg
 
 
-@hydra.main(config_path="configs", config_name="rnn_tree_sweep_rebuttals", version_base=None)
+@hydra.main(config_path="configs", config_name="harness_rnn_scan", version_base=None)
 def main(cfg: DictConfig):
     seed = cfg.seed
     N = cfg.N

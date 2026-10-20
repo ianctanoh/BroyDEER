@@ -53,7 +53,7 @@ from omegaconf import DictConfig, OmegaConf
 from lightning.pytorch.loggers import WandbLogger
 import time
 
-from algs.sn_word import SN_word, sample_permutations
+from dynamics.sn_word import SN_word, sample_permutations
 from algs.deer import deer_alg, get_residual, stopping_criterion
 from algs.accelerated_broyden import accelerated_broyden_deer_alg
 

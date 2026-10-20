@@ -1,4 +1,4 @@
-# N-schools rebuttal sweep: S=100, T=100000, seq vs accelerated_broyden only, on H100
+# N-schools sweep: S=100, T=100000, seq vs accelerated_broyden only, on H100
 command:
   - ${env}
   - JAX_PLATFORMS=cuda
@@ -58,4 +58,4 @@ parameters:
   sigmasq_0:
     value: 10.0
 project: broydeer
-name: Nschools_rebuttal
+name: Nschools_S100_T100k

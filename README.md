@@ -13,7 +13,7 @@ discrete-time dynamical systems, written in JAX. The package (`brodeer`) contain
 | Associative-scan tree topologies (Blelloch / Hillis-Steele) | `src/algs/scan_trees.py` |
 | DDIM-specialized variants (Picard, DEER, Broyden, Accelerated Broyden) | `src/algs/*_ddim.py` |
 
-Dynamical systems live in `src/dynamics/` (N-schools HMC, low-rank RNN,
+Dynamical systems live in `src/dynamics/` (N-schools Gibbs sampler, low-rank RNN,
 discretized mean-field RNN, GRU, S_N word problem, DDIM diffusion), and the
 JAX port of DiT-XL/2 is in `src/models/dit.py`.
 
@@ -72,13 +72,13 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | TODO | N-schools: damping k=0.2 | `wandb sweep wandb_sweep_configs/Nschools_k02.yaml` |
 | TODO | N-schools: rescaled | `wandb sweep wandb_sweep_configs/Nschools_rescaled.yaml` |
 | TODO | N-schools: Broyden memory (S=10/50/100) | `wandb sweep wandb_sweep_configs/Nschools_qmem_S{10,50,100}.yaml` |
-| TODO | N-schools: additional comparison | `wandb sweep wandb_sweep_configs/Nschools_rebuttal.yaml` |
+| TODO | N-schools: S=100, T=100k, sequential vs. Accelerated Broyden | `wandb sweep wandb_sweep_configs/Nschools_S100_T100k.yaml` |
 | TODO | Low-rank RNN: runtime vs. (N, T), regime A (dt=3) | `wandb sweep sweep_rnn_A.yaml` (also `sweep_rnn_A_full.yaml`, `_N1000`, `_T500k`, `_rescaled`) |
 | TODO | Low-rank RNN: regime B (dt=7) | `wandb sweep sweep_rnn_B.yaml` |
 | TODO | Low-rank RNN: Broyden damping / rescaling | `wandb sweep sweep_rnn_A_broyden_damping.yaml`, `sweep_rnn_A_broyden_rescaled.yaml` |
 | TODO | Low-rank RNN: Jacobian recovery | `wandb sweep sweep_rnn_A_jacobian.yaml` (also `_jacobian_nodamp`, `_jac_perchain`, `_jac_perchain_N200`, `_jac_patch`) |
 | TODO | Low-rank RNN: compression scheme | `wandb sweep sweep_rnn_A_compress.yaml` |
-| TODO | Low-rank RNN: scan tree topology | `wandb sweep sweep_rnn_tree_rebuttals.yaml` |
+| TODO | Low-rank RNN: scan tree topology | `wandb sweep sweep_rnn_A_scan_tree.yaml` |
 | TODO | Low-rank RNN: single runs | `python harness_low_rank_rnn.py alg=<alg> ...` (sweep: `wandb_sweep_configs/low_rank_rnn.yaml`) |
 | TODO | GRU | `python harness_gru.py -m alg=seq,deer,quasi D=32 tol=1e-5`<br>`python harness_gru.py -m alg=broyden D=32 bd_m=1,2,3,5,10,15,20 tol=1e-5`<br>`python harness_gru.py -m alg=accelerated_broyden D=32 acc_m=1,2,3,5,10,15,20 tol=1e-5` |
 | TODO | Discretized mean-field RNN | `python harness_dmf_rnn.py -m alg=seq,deer,quasi D=128 T=5000 g=1.7`<br>`python harness_dmf_rnn.py -m alg=broyden D=128 T=5000 g=1.7 bd_m=1,2,3,5,10,15,20,25 bd_init=identity bd_gamma=0.1`<br>`python harness_dmf_rnn.py -m alg=accelerated_broyden D=128 T=5000 g=1.7 acc_m=1,2,3,5,10,15,20,25 acc_init=identity acc_gamma=0.1` |

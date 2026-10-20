@@ -2,7 +2,7 @@
 sn_word.py
 Symmetric-group S_N word problem dynamical system.
 
-Same structure as s5_word.py but avoids storing all N! permutation matrices.
+Avoids storing all N! permutation matrices.
 Each driver is itself a length-N permutation array:
 
     x_t = P_{u_t} x_{t-1}    <=>    x_t[i] = x_{t-1}[u_t[i]]
