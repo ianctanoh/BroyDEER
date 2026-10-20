@@ -1,0 +1,51 @@
+# Sweep A: damping sweep for standard Broyden
+# Compare different bd_k values, rand compression, identity init
+program: harness_rnn_single.py
+method: grid
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+
+parameters:
+  alg:
+    values:
+      - broyden
+  N:
+    values: [50, 100]
+  T:
+    values: [10000, 100000, 200000]
+  bd_k:
+    values: [0.0, 0.1, 0.2, 0.3, 0.5]
+
+  batch_size:
+    value: 32
+  dt:
+    value: 3.0
+  tau:
+    value: 10.0
+  g:
+    value: 2.0
+  R:
+    value: 3
+  bd_gamma:
+    value: 0.7
+  acc_gamma:
+    value: 0.7
+  bd_m:
+    value: 3
+  acc_m:
+    value: 3
+  bd_init:
+    value: identity
+  acc_init:
+    value: identity
+  acc_k:
+    value: 0.2
+  acc_eps_gram:
+    value: 0.000001
+  acc_compress:
+    value: rand
+  deer_k:
+    value: 0.2

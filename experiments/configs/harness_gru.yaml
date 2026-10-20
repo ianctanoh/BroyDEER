@@ -1,0 +1,36 @@
+seed: 42
+D: 32
+T: 1000
+gain: 3.0
+sigma_noise: 1.0
+num_iters: 100
+tol: 1e-2
+batch_size: 16
+nwarmups: 3
+nreps: 3
+mode: "online"
+alg: "deer"
+
+# DEER / quasi-DEER specific
+deer_k: 0.0
+
+# Broyden-DEER specific
+bd_m: 5
+bd_init: "rescaled_identity"
+bd_k: 0.0
+bd_gamma: 0.4
+bd_compress: "rand"
+
+# Accelerated Broyden specific
+acc_m: 5
+acc_init: "rescaled_identity"
+acc_k: 0.0
+acc_eps_gram: 1e-6
+acc_gamma: 0.4
+acc_compress: "rand"
+
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: False

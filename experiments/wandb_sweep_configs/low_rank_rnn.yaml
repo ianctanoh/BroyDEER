@@ -1,0 +1,67 @@
+# Low-rank RNN sweep: compare algorithms across neuron counts N
+# g=1, R=3, T=10000, dt=7, batch_size=16, seed=42
+command:
+  - ${env}
+  - JAX_PLATFORMS=cuda
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+method: grid
+program: harness_low_rank_rnn.py
+parameters:
+  alg:
+    values: ['seq', 'deer', 'quasi', 'jacobi', 'broyden', 'accelerated_broyden']
+  N:
+    values: [100, 500, 1000]
+  seed:
+    value: 42
+  R:
+    value: 3
+  T:
+    value: 1000000
+  tau:
+    value: 10.0
+  dt:
+    value: 7.0
+  g:
+    value: 1.0
+  sigma_noise:
+    value: 0.1
+  phi:
+    value: "tanh"
+  batch_size:
+    value: 16
+  num_iters:
+    value: 10000
+  tol:
+    value: 1e-4
+  nwarmups:
+    value: 3
+  nreps:
+    value: 3
+  mode:
+    value: "online"
+  deer_k:
+    value: 0.0
+  bd_m:
+    value: 3
+  bd_init:
+    value: "identity"
+  bd_k:
+    value: 0.0
+  bd_gamma:
+    value: 0.4
+  acc_m:
+    value: 3
+  acc_init:
+    value: "identity"
+  acc_k:
+    value: 0.0
+  acc_eps_gram:
+    value: 1e-6
+  acc_gamma:
+    value: 0.4
+  acc_compress:
+    value: "rand"
+project: broydeer_rnn
+name: low_rank_rnn_N_sweep

@@ -5,6 +5,9 @@ helper file to save out wandb sweeps to pickle files
 
 Usage:
 
+    python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
+        --pickle_name <name> --date <YYYY-MM-DD>
+
 name of sweep: user/project/sweep_id
 name of pickle file: a helpful name for the pickle file
 """
@@ -21,10 +24,11 @@ if __name__ == "__main__":
     parser.add_argument("--sweep_id", type=str, required=True, help="Wandb sweep id")
     parser.add_argument("--pickle_name", type=str, required=True, help="Name of pickle file")
     parser.add_argument("--date", type=str, required=True, help="Directory to save files")
+    parser.add_argument("--project", type=str, required=True, help="Wandb project path: entity/project")
     args = parser.parse_args()
 
     api = wandb.Api()
-    project = "ictanoh_team/broydeer"
+    project = args.project
     saved_files = os.path.join(os.path.dirname(__file__), "saved_files")
     os.makedirs(saved_files, exist_ok=True)
     sweep = api.sweep(f"{project}/{args.sweep_id}")

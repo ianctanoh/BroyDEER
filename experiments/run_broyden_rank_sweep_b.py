@@ -1,0 +1,173 @@
+"""
+run_broyden_rank_sweep.py
+
+Sweep Broyden and AccBroyden rank (m=3,4,5) on 16 ImageNet classes (batch B).
+Sequential reference included for LPIPS baseline.
+
+Usage:
+    sbatch run_broyden_rank_sweep.sh
+"""
+
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+
+import time
+import pickle
+import numpy as np
+import jax
+import jax.numpy as jnp
+import matplotlib
+matplotlib.use("Agg")
+
+from algs.broyden_ddim import broyden_ddim_alg
+from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
+from models.dit import make_dit_diffusion
+
+# ── config ──
+dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                         "pretrained_models", "DiT-XL-2-256x256.pt")
+dit_T     = 50
+dit_cfg   = 5.0
+dit_seed  = 0
+max_n     = 50
+tol       = 1.0
+nwarmups  = 2
+nreps     = 3
+save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit")
+
+ranks = [3, 4, 5]
+
+class_labels = {    "king_penguin": 145,    "toucan": 96,    "tree_frog": 31,    "chameleon": 47,    "coral_reef_fish": 392,    "hammerhead_shark": 4,    "sea_turtle": 33,    "dalmatian": 251,    "siamese_cat": 284,    "cheetah": 293,    "brown_bear": 294,    "bison": 347,    "hippopotamus": 344,    "orangutan": 365,    "macaw": 88,    "ladybug": 301,}
+
+print(f"Device: {jax.devices()}")
+print(f"T={dit_T}, cfg={dit_cfg}, max_n={max_n}, tol={tol}")
+print(f"Ranks: {ranks}")
+print(f"Classes: {list(class_labels.keys())}")
+sys.stdout.flush()
+
+lat_C, lat_H, lat_W = 4, 32, 32
+D = lat_C * lat_H * lat_W
+
+# build method names
+method_names = ["Sequential"]
+for m in ranks:
+    method_names.append(f"Broyden_m{m}")
+    method_names.append(f"AccBroyden_m{m}")
+
+results = {
+    "config": {
+        "T": dit_T, "cfg": dit_cfg, "tol": tol, "max_n": max_n,
+        "seed": dit_seed, "classes": class_labels, "ranks": ranks,
+    },
+}
+for mname in method_names:
+    results[mname] = {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}}
+
+print(f"\n--- Running {len(class_labels)} classes x {len(method_names)} methods ---")
+
+for cls_name, cls_id in class_labels.items():
+    print(f"\n  == {cls_name} (class {cls_id}) ==")
+    sys.stdout.flush()
+
+    deer_fxn_cls, dynamics_cls, x0, drivers, _ = make_dit_diffusion(
+        dit_ckpt, T=dit_T, class_label=cls_id, cfg_scale=dit_cfg,
+        eta=0.0, seed=dit_seed,
+    )
+    guess = jnp.broadcast_to(x0, (dit_T, D))
+
+    # sequential
+    @jax.jit
+    def run_seq_cls(x0, drivers):
+        _, traj = jax.lax.scan(
+            lambda s, d: (deer_fxn_cls(s, d), deer_fxn_cls(s, d)), x0, drivers
+        )
+        return traj
+
+    # build jitted fns per rank
+    cls_methods = {}
+    for m in ranks:
+        @jax.jit
+        def run_broy(x0, guess, drivers, _m=m):
+            res = broyden_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
+                                   m=_m, init="identity", gamma=1.0, k=0.0,
+                                   full_trace=False, tol=tol,
+                                   sequential_solve=False, compress="rand")
+            return res[1], res[2]
+
+        @jax.jit
+        def run_acc(x0, guess, drivers, _m=m):
+            res = accelerated_broyden_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
+                                               m=_m, init="identity", gamma=1.0, k=0.0,
+                                               full_trace=False, tol=tol,
+                                               sequential_solve=True)
+            return res[1], res[2]
+
+        cls_methods[f"Broyden_m{m}"] = run_broy
+        cls_methods[f"AccBroyden_m{m}"] = run_acc
+
+    # compile + warmup
+    print("    compiling ...", end=" ", flush=True)
+    run_seq_cls.lower(x0, drivers).compile()
+    for mfn in cls_methods.values():
+        mfn.lower(x0, guess, drivers).compile()
+    _ = run_seq_cls(x0, drivers)
+    for mfn in cls_methods.values():
+        _ = mfn(x0, guess, drivers)
+    jax.block_until_ready(_)
+    print("done.")
+
+    # sequential
+    t0 = time.time()
+    for _ in range(nreps):
+        seq_result = run_seq_cls(x0, drivers)
+        jax.block_until_ready(seq_result)
+    t_seq = (time.time() - t0) / nreps
+    seq_traj = np.array(seq_result)
+    results["Sequential"]["runtime"][cls_name] = t_seq
+    results["Sequential"]["iters"][cls_name] = dit_T
+    results["Sequential"]["latent"][cls_name] = np.array(seq_traj[-1])
+    print(f"    Sequential: {dit_T} steps, {t_seq:.3f}s")
+
+    # parallel methods
+    for mname, mfn in cls_methods.items():
+        t0 = time.time()
+        for _ in range(nreps):
+            res = mfn(x0, guess, drivers)
+            jax.block_until_ready(res)
+        t_avg = (time.time() - t0) / nreps
+        final, steps = np.array(res[0]), int(res[1])
+        results[mname]["runtime"][cls_name] = t_avg
+        results[mname]["iters"][cls_name] = steps
+        results[mname]["latent"][cls_name] = np.array(final[-1])
+        print(f"    {mname}: {steps} iters, {t_avg:.3f}s")
+
+    jax.clear_caches()
+    sys.stdout.flush()
+
+# ── save pkl ──
+os.makedirs(save_dir, exist_ok=True)
+pkl_path = os.path.join(save_dir, "broyden_rank_sweep_b.pkl")
+with open(pkl_path, "wb") as f:
+    pickle.dump(results, f)
+print(f"\nSaved results to {pkl_path}")
+
+# ── summary ──
+print("\n" + "=" * 70)
+print(f"  {'Class':<20s}  {'Method':<18s}  {'Iters':>5s}  {'Time':>8s}")
+print("-" * 70)
+for cls_name in class_labels:
+    for mname in method_names:
+        iters = results[mname]["iters"][cls_name]
+        rt = results[mname]["runtime"][cls_name]
+        print(f"  {cls_name:<20s}  {mname:<18s}  {iters:>5d}  {rt:>7.3f}s")
+print("=" * 70)
+
+print(f"\n  {'AVERAGE':<20s}  {'Method':<18s}  {'Iters':>5s}  {'Time':>8s}")
+print("-" * 70)
+for mname in method_names:
+    avg_iters = np.mean(list(results[mname]["iters"].values()))
+    avg_rt = np.mean(list(results[mname]["runtime"].values()))
+    print(f"  {'':>20s}  {mname:<18s}  {avg_iters:>5.1f}  {avg_rt:>7.3f}s")
+print("=" * 70)
+
+print("\nDone! Run compute_lpips.py to decode images and compute LPIPS.")

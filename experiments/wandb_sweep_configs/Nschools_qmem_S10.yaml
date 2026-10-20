@@ -1,0 +1,63 @@
+# Quasi-DEER qmem num_samples sweep for S=10 (D=22)
+command:
+  - ${env}
+  - JAX_PLATFORMS=cuda
+  - JAX_ENABLE_X64=True
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+method: grid
+program: harness_Nschools.py
+parameters:
+  alg:
+    value: 'quasi_qmem'
+  S:
+    value: 10
+  T:
+    values: [1000, 10000, 50000, 100000]
+  num_samples:
+    values: [2, 5, 10, 15, 22]
+  seed:
+    value: 13
+  N_s:
+    value: 20
+  batch_size:
+    value: 4
+  num_iters:
+    value: 1000
+  tol:
+    value: 1e-4
+  nwarmups:
+    value: 3
+  nreps:
+    value: 3
+  mode:
+    value: "online"
+  deer_k:
+    value: 0.0
+  bd_m:
+    value: 2
+  bd_init:
+    value: "identity"
+  bd_k:
+    value: 0.2
+  bd_gamma:
+    value: 0.
+  acc_m:
+    value: 2
+  acc_init:
+    value: "identity"
+  acc_k:
+    value: 0.1
+  acc_eps_gram:
+    value: 1e-6
+  acc_gamma:
+    value: 0.
+  acc_compress:
+    value: "low_rank_exact"
+  tausq_0:
+    value: 100.0
+  sigmasq_0:
+    value: 10.0
+project: broydeer
+name: qmem_S10_num_samples

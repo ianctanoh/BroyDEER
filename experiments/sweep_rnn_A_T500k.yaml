@@ -1,0 +1,51 @@
+# Sweep A, T=500k, small N, no vmap
+program: harness_rnn_single.py
+method: grid
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+
+parameters:
+  alg:
+    values:
+      - seq
+      - deer
+      - broyden
+      - accelerated_broyden
+  N:
+    values: [100, 200]
+  T:
+    values: [500000]
+
+  dt:
+    value: 3.0
+  tau:
+    value: 10.0
+  g:
+    value: 2.0
+  R:
+    value: 3
+  bd_gamma:
+    value: 0.7
+  acc_gamma:
+    value: 0.7
+  bd_m:
+    value: 3
+  acc_m:
+    value: 3
+  bd_init:
+    value: identity
+  acc_init:
+    value: identity
+  bd_k:
+    value: 0.2
+  acc_k:
+    value: 0.2
+  acc_eps_gram:
+    value: 0.000001
+  acc_compress:
+    value: rand
+  deer_k:
+    value: 0.0

@@ -1,6 +1,9 @@
 seed: 13
 S: 10
 T: 10000
+N_s: 20
+tausq_0: 100.0
+sigmasq_0: 10.0
 num_iters: 200
 tol: 1e-2
 batch_size: 16
@@ -10,12 +13,13 @@ mode: "online"
 alg: "deer"
 
 # DEER / quasi-DEER specific
-deer_k: 0.0
+deer_k: 0.2
+num_samples: 1
 
 # Broyden-DEER specific
-bd_m: 3
+bd_m: 2
 bd_init: "identity"
-bd_k: 0.5
+bd_k: 0.2
 bd_gamma: 0.
 
 # Accelerated Broyden specific
@@ -24,7 +28,7 @@ acc_init: "identity"
 acc_k: 0.2
 acc_eps_gram: 1e-6
 acc_gamma: 0.
-acc_compress: "svd"
+acc_compress: "low_rank_exact"
 
 hydra:
   run:

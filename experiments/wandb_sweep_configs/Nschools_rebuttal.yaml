@@ -1,0 +1,61 @@
+# N-schools rebuttal sweep: S=100, T=100000, seq vs accelerated_broyden only, on H100
+command:
+  - ${env}
+  - JAX_PLATFORMS=cuda
+  - JAX_ENABLE_X64=True
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+method: grid
+program: harness_Nschools.py
+parameters:
+  alg:
+    values: ['seq', 'accelerated_broyden']
+  S:
+    value: 100
+  T:
+    value: 100000
+  seed:
+    value: 13
+  N_s:
+    value: 20
+  batch_size:
+    value: 32
+  num_iters:
+    value: 1000
+  tol:
+    value: 1e-4
+  nwarmups:
+    value: 3
+  nreps:
+    value: 3
+  mode:
+    value: "online"
+  deer_k:
+    value: 0.0
+  bd_m:
+    value: 2
+  bd_init:
+    value: "identity"
+  bd_k:
+    value: 0.2
+  bd_gamma:
+    value: 0.
+  acc_m:
+    value: 2
+  acc_init:
+    value: "identity"
+  acc_k:
+    value: 0.2
+  acc_eps_gram:
+    value: 1e-6
+  acc_gamma:
+    value: 0.
+  acc_compress:
+    value: "rand"
+  tausq_0:
+    value: 100.0
+  sigmasq_0:
+    value: 10.0
+project: broydeer
+name: Nschools_rebuttal

@@ -32,6 +32,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 import jax
+jax.config.update("jax_enable_x64", True)
 # assert jax.devices()[0].platform == "gpu", f"No GPU found. Devices: {jax.devices()}"
 import jax.numpy as jnp
 import jax.random as jr
@@ -67,151 +68,243 @@ def main(cfg: DictConfig):
     logger.log_hyperparams(OmegaConf.to_container(cfg))
     wandb.config.update(OmegaConf.to_container(cfg), allow_val_change=True)
 
-    # set up dynamics
-    deer_fxn, params, xs, D = make_eight_schools(S=S, seed=seed)
+    # Per-element chains: each gets a different seed for data generation
+    # and a different PRNG key for chain initialization/drivers
+    total_chains = batch_size
 
-    # set up initial state and drivers — matches notebook exactly
-    nu_N      = params["nu_N"]
-    alpha_N   = params["alpha_N"]
-    tausq_0   = params["tausq_0"]
-    kappa_0   = params["kappa_0"]
-    mu_0      = params["mu_0"]
-    sigmasq_0 = params.get("sigmasq_0", 10.0)
+    def setup_chain(chain_idx):
+        """Set up one chain with its own dataset and initialization."""
+        chain_seed = seed + chain_idx
+        deer_fxn_i, params_i, xs_i, D_i = make_eight_schools(
+            S=S, N_s=cfg.N_s, seed=chain_seed,
+            tausq_0=cfg.tausq_0, sigmasq_0=cfg.sigmasq_0)
 
-    key = jr.PRNGKey(1313)
-    key, init_key = jr.split(key)
+        nu_N      = params_i["nu_N"]
+        alpha_N   = params_i["alpha_N"]
+        tausq_0_i = params_i["tausq_0"]
+        kappa_0   = params_i["kappa_0"]
+        mu_0      = params_i["mu_0"]
+        sigmasq_0_i = params_i.get("sigmasq_0", 10.0)
 
-    def sample_prior(key):
-        key, *skeys = jr.split(key, 5)
-        tausq    = tfd.InverseGamma(0.5 * nu_N, nu_N * tausq_0 * 0.5).sample(seed=skeys[0])
-        mu       = tfd.Normal(mu_0, jnp.sqrt(tausq / kappa_0)).sample(seed=skeys[1])
-        thetas   = tfd.Normal(mu, jnp.sqrt(tausq)).sample((S,), seed=skeys[2])
-        sigmasqs = tfd.InverseGamma(0.5 * alpha_N, 0.5 * alpha_N * sigmasq_0).sample((S,), seed=skeys[3])
-        return jnp.concatenate((thetas, sigmasqs, jnp.array([mu]), jnp.array([tausq])))
+        def sample_prior(key):
+            key, *skeys = jr.split(key, 5)
+            tausq    = tfd.InverseGamma(0.5 * nu_N, nu_N * tausq_0_i * 0.5).sample(seed=skeys[0])
+            mu       = tfd.Normal(mu_0, jnp.sqrt(tausq / kappa_0)).sample(seed=skeys[1])
+            thetas   = tfd.Normal(mu, jnp.sqrt(tausq)).sample((S,), seed=skeys[2])
+            sigmasqs = tfd.InverseGamma(0.5 * alpha_N, 0.5 * alpha_N * sigmasq_0_i).sample((S,), seed=skeys[3])
+            return jnp.concatenate((thetas, sigmasqs, jnp.array([mu]), jnp.array([tausq])))
 
-    initial_state = sample_prior(init_key)
-    key, step_key = jr.split(key)
-    initial_state = deer_fxn(initial_state, step_key)
+        master_key = jr.PRNGKey(chain_idx)
+        key, init_key = jr.split(master_key)
+        init_state = sample_prior(init_key)
+        key, step_key = jr.split(key)
+        init_state = deer_fxn_i(init_state, step_key)
+        key, drivers_key = jr.split(key)
+        drivers = jr.split(drivers_key, T)
 
-    key, drivers_key = jr.split(key)
-    driver_keys = jr.split(drivers_key, batch_size)
-    drivers = jax.vmap(lambda k: jr.split(k, T))(driver_keys)  # (batch_size, T, 2)
-    states_guess = jnp.broadcast_to(initial_state, (T, D))
+        return deer_fxn_i, init_state, drivers, D_i
 
-    # define evaluation functions — pass drivers as argument (not closed over)
-    # so JAX traces with abstract shapes rather than concrete T=10000 arrays
-    def seq_eval(drivers):
-        def step(state, driver):
-            new = deer_fxn(state, driver)
-            return new, new
-        _, samples = jax.lax.scan(step, initial_state, drivers)
-        return samples[-1]
+    all_chain_data = [setup_chain(i) for i in range(total_chains)]
+    deer_fxn_0, _, _, D = all_chain_data[0]
 
-    def deer_eval(drivers):
-        _, _, newton_steps, *_ = deer_alg(
-            deer_fxn, initial_state, states_guess, drivers,
-            num_iters, k=cfg.deer_k,
-            full_trace=False, tol=tol,
-        )
-        return newton_steps
+    # lower bounds: sigmasqs and tausq must be positive
+    lower_bounds = jnp.concatenate([
+        jnp.full(S, -jnp.inf),      # thetas
+        jnp.full(S, 1e-6),          # sigmasqs
+        jnp.array([-jnp.inf]),      # mu
+        jnp.array([1e-6]),           # tausq
+    ])
 
-    def quasi_eval(drivers):
-        _, _, newton_steps, *_ = deer_alg(
-            deer_fxn, initial_state, states_guess, drivers,
-            num_iters, quasi=True, k=cfg.deer_k,
-            full_trace=False, tol=tol,
-        )
-        return newton_steps
+    # Use first chain for print info
+    _, init_state_0, drivers_0, _ = all_chain_data[0]
+    states_guess_0 = jnp.broadcast_to(init_state_0, (T, D))
 
-    def picard_eval(drivers):
-        _, _, newton_steps, *_ = picard_alg(
-            deer_fxn, initial_state, states_guess, drivers,
-            num_iters, full_trace=False, tol=tol,
-        )
-        return newton_steps
+    print(f"x64 enabled: {jax.config.jax_enable_x64}")
+    print(f"states_guesses dtype: {states_guess_0.dtype}")
+    print(f"drivers dtype: {drivers_0.dtype}")
 
-    def jacobi_eval(drivers):
-        _, _, newton_steps, *_ = jacobi_alg(
-            deer_fxn, initial_state, states_guess, drivers,
-            num_iters, full_trace=False, tol=tol,
-        )
-        return newton_steps
+    # define evaluation functions — each takes its own deer_fxn
+    def make_seq_eval(deer_fxn_i):
+        def seq_eval(initial_state, states_guess, drivers):
+            def step(state, driver):
+                new = deer_fxn_i(state, driver)
+                return new, new
+            _, samples = jax.lax.scan(step, initial_state, drivers)
+            return samples[-1]
+        return seq_eval
 
-    def broyden_eval(drivers):
-        _, _, newton_steps, *_ = broyden_deer_alg(
-            deer_fxn, initial_state, states_guess, drivers,
-            num_iters, m=cfg.bd_m, init=cfg.bd_init,
-            k=cfg.bd_k, gamma=cfg.bd_gamma,
-            full_trace=False, tol=tol,
-        )
-        return newton_steps
+    def make_deer_eval(deer_fxn_i):
+        def deer_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, *_ = deer_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, k=cfg.deer_k,
+                full_trace=False, tol=tol,
+            )
+            return newton_steps
+        return deer_eval
 
-    def accelerated_broyden_eval(drivers):
-        _, _, newton_steps, *_ = accelerated_broyden_deer_alg(
-            deer_fxn, initial_state, states_guess, drivers,
-            num_iters, m=cfg.acc_m, init=cfg.acc_init,
-            k=cfg.acc_k, gamma=cfg.acc_gamma,
-            eps_gram=cfg.acc_eps_gram, compress=cfg.acc_compress,
-            full_trace=False, tol=tol,
-        )
-        return newton_steps
+    def make_quasi_eval(deer_fxn_i):
+        def quasi_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, *_ = deer_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, quasi=True, k=cfg.deer_k,
+                full_trace=False, tol=tol,
+            )
+            return newton_steps
+        return quasi_eval
 
-    # select and compile
-    eval_fns = {
-        "seq": seq_eval,
-        "deer": deer_eval,
-        "quasi": quasi_eval,
-        "picard": picard_eval,
-        "jacobi": jacobi_eval,
-        "broyden": broyden_eval,
-        "accelerated_broyden": accelerated_broyden_eval,
+    def make_quasi_qmem_eval(deer_fxn_i):
+        def quasi_qmem_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, *_ = deer_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, quasi=True, k=cfg.deer_k,
+                qmem_efficient=True, num_samples=cfg.num_samples,
+                full_trace=False, tol=tol,
+            )
+            return newton_steps
+        return quasi_qmem_eval
+
+    def make_picard_eval(deer_fxn_i):
+        def picard_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, *_ = picard_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, full_trace=False, tol=tol,
+            )
+            return newton_steps
+        return picard_eval
+
+    def make_jacobi_eval(deer_fxn_i):
+        def jacobi_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, *_ = jacobi_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, full_trace=False, tol=tol,
+            )
+            return newton_steps
+        return jacobi_eval
+
+    def make_broyden_eval(deer_fxn_i):
+        def broyden_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, *_ = broyden_deer_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, m=cfg.bd_m, init=cfg.bd_init,
+                k=cfg.bd_k, gamma=cfg.bd_gamma,
+                sequential_solve=False,
+                compress=cfg.acc_compress,
+                full_trace=False, tol=tol,
+                lower_bounds=lower_bounds,
+                line_search=True, ls_c=1e-3,
+            )
+            return newton_steps
+        return broyden_eval
+
+    def make_accelerated_broyden_eval(deer_fxn_i):
+        def accelerated_broyden_eval(initial_state, states_guess, drivers):
+            _, _, newton_steps, _, _, all_newtons, _ = accelerated_broyden_deer_alg(
+                deer_fxn_i, initial_state, states_guess, drivers,
+                num_iters, m=cfg.acc_m, init=cfg.acc_init,
+                k=cfg.acc_k, gamma=cfg.acc_gamma,
+                eps_gram=cfg.acc_eps_gram, compress=cfg.acc_compress,
+                full_trace=False, tol=tol,
+                lower_bounds=lower_bounds, line_search=True, ls_c=1e-2,
+            )
+            return newton_steps, all_newtons
+        return accelerated_broyden_eval
+
+    make_eval_fns = {
+        "seq": make_seq_eval,
+        "deer": make_deer_eval,
+        "quasi": make_quasi_eval,
+        "quasi_qmem": make_quasi_qmem_eval,
+        "picard": make_picard_eval,
+        "jacobi": make_jacobi_eval,
+        "broyden": make_broyden_eval,
+        "accelerated_broyden": make_accelerated_broyden_eval,
     }
-    if alg not in eval_fns:
-        raise ValueError(f"Invalid algorithm: {alg}. Choose from {list(eval_fns.keys())}")
+    if alg not in make_eval_fns:
+        raise ValueError(f"Invalid algorithm: {alg}. Choose from {list(make_eval_fns.keys())}")
 
-    use_highest = alg in ("deer", "quasi", "broyden", "accelerated_broyden")
+    use_highest = alg in ("deer", "quasi", "quasi_qmem", "broyden", "accelerated_broyden")
 
-    if use_highest:
-        with jax.default_matmul_precision("highest"):
-            fxn = jax.jit(jax.vmap(eval_fns[alg]))
-            fxn.lower(drivers).compile()
-    else:
-        fxn = jax.jit(jax.vmap(eval_fns[alg]))
-        fxn.lower(drivers).compile()
+    # timed runs: loop over each chain individually
+    all_steps_list = []
+    all_times_list = []
 
-    # warmup (triggers compilation) + timed runs
-    if use_highest:
-        with jax.default_matmul_precision("highest"):
+    for i in range(total_chains):
+        deer_fxn_i, init_state_i, drivers_i, _ = all_chain_data[i]
+        states_guess_i = jnp.broadcast_to(init_state_i, (T, D))
+
+        eval_fn_i = make_eval_fns[alg](deer_fxn_i)
+        fxn_i = jax.jit(eval_fn_i)
+
+        # warmup: trigger compilation before timing
+        if use_highest:
+            with jax.default_matmul_precision("highest"):
+                for _ in range(nwarmups):
+                    _warmup = fxn_i(init_state_i, states_guess_i, drivers_i)
+                    jax.block_until_ready(_warmup)
+        else:
             for _ in range(nwarmups):
-                result = fxn(drivers)
-                jax.block_until_ready(result)
+                _warmup = fxn_i(init_state_i, states_guess_i, drivers_i)
+                jax.block_until_ready(_warmup)
+
+        if use_highest:
+            with jax.default_matmul_precision("highest"):
+                t0 = time.time()
+                for _ in range(nreps):
+                    result_i = fxn_i(init_state_i, states_guess_i, drivers_i)
+                    jax.block_until_ready(result_i)
+                t1 = time.time()
+        else:
             t0 = time.time()
             for _ in range(nreps):
-                result = fxn(drivers)
-                jax.block_until_ready(result)
+                result_i = fxn_i(init_state_i, states_guess_i, drivers_i)
+                jax.block_until_ready(result_i)
             t1 = time.time()
-    else:
-        for _ in range(nwarmups):
-            result = fxn(drivers)
-            jax.block_until_ready(result)
-        t0 = time.time()
-        for _ in range(nreps):
-            result = fxn(drivers)
-            jax.block_until_ready(result)
-        t1 = time.time()
+        chain_time = (t1 - t0) / nreps
+        all_times_list.append(chain_time)
 
-    time_avg = (t1 - t0) / nreps
+        if alg == "seq":
+            all_steps_list.append(T)
+        elif alg == "accelerated_broyden":
+            newton_steps_i, _ = result_i
+            all_steps_list.append(int(newton_steps_i))
+        else:
+            all_steps_list.append(int(result_i))
+
+    all_steps = jnp.array(all_steps_list)
+    all_times = jnp.array(all_times_list)
 
     if alg == "seq":
-        n_iters = T
+        n_converged = total_chains
+        converged_steps = all_steps
+        converged_times = all_times
     else:
-        n_iters = float(jnp.mean(result))
+        converged_mask = all_steps < num_iters
+        n_converged = int(jnp.sum(converged_mask))
+        converged_steps = all_steps[converged_mask]
+        converged_times = all_times[converged_mask]
 
-    print(f"{alg} | S={S}, T={T}, D={D} | time: {time_avg:.3e}s | n_iters: {n_iters}")
+    n_iters_mean = float(jnp.mean(converged_steps)) if n_converged > 0 else float(num_iters)
+    n_iters_sd = float(jnp.std(converged_steps)) if n_converged > 0 else 0.0
+    time_mean = float(jnp.mean(converged_times)) if n_converged > 0 else float(jnp.mean(all_times))
+    time_sd = float(jnp.std(converged_times)) if n_converged > 0 else float(jnp.std(all_times))
+
+    print(f"{alg} | S={S}, T={T}, D={D} | "
+          f"converged: {n_converged}/{total_chains} | "
+          f"n_iters: {n_iters_mean:.1f} ± {n_iters_sd:.1f} | "
+          f"time: {time_mean:.3e} ± {time_sd:.3e}s")
+    print(f"  per-chain n_iters: {all_steps.tolist()}")
+    print(f"  per-chain times: {[f'{t:.4e}' for t in all_times_list]}")
 
     results = {
-        "time": time_avg,
-        "n_iters": n_iters,
+        "per_chain_n_iters": all_steps.tolist(),
+        "per_chain_times": all_times_list,
+        "n_iters_mean": n_iters_mean,
+        "n_iters_sd": n_iters_sd,
+        "time_mean": time_mean,
+        "time_sd": time_sd,
+        "n_converged": n_converged,
+        "frac_converged": n_converged / total_chains,
         "D": D,
     }
     logger.log_metrics(results)

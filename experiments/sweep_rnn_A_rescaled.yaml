@@ -1,0 +1,55 @@
+# Sweep A (rescaled_identity): dt=3.0, tau=10.0, g=2.0
+# Same as sweep_rnn_A.yaml but with init=rescaled_identity for both Broyden methods.
+
+program: harness_rnn_sweep.py
+method: grid
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+
+parameters:
+  alg:
+    values:
+      - seq
+      - deer
+      - quasi
+      - broyden
+      - accelerated_broyden
+  N:
+    values: [100, 1000, 10000]
+  T:
+    values: [1000, 10000, 100000]
+
+  # --- fixed for Script A ---
+  dt:
+    value: 3.0
+  tau:
+    value: 10.0
+  g:
+    value: 2.0
+  R:
+    value: 3
+  bd_gamma:
+    value: 0.7
+  acc_gamma:
+    value: 0.7
+  bd_m:
+    value: 3
+  acc_m:
+    value: 3
+  bd_init:
+    value: rescaled_identity
+  acc_init:
+    value: rescaled_identity
+  bd_k:
+    value: 0.2
+  acc_k:
+    value: 0.2
+  acc_eps_gram:
+    value: 0.000001
+  acc_compress:
+    value: rand
+  deer_k:
+    value: 0.0
