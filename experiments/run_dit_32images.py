@@ -1,13 +1,15 @@
 """
 run_dit_32images.py
 
-Run 3 best methods on 32 different ImageNet classes (animals).
+Run all DiT solvers on 32 different ImageNet classes (animals).
 Save per-image runtime, LPIPS, and iteration count as pkl.
 
-Methods:
-  1. Broyden:      m=2, gamma=1.0, identity
-  2. AccBroyden:   m=2, gamma=1.0, identity
-  3. TAA:          k=6, m=2
+Methods (all DDIM-specific solvers, same convergence check):
+  1. Picard
+  2. QuasiDEER:    Hutchinson diagonal, 1 sample
+  3. Broyden:      m=2, gamma=1.0, identity
+  4. AccBroyden:   m=2, gamma=1.0, identity
+  5. TAA:          k=6, m=2
 
 Usage:
     python run_dit_32images.py
@@ -29,7 +31,8 @@ import matplotlib.pyplot as plt
 from algs.taa import taa_ddim_alg
 from algs.broyden_ddim import broyden_ddim_alg
 from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
-from algs.deer import deer_alg
+from algs.picard_ddim import picard_ddim_alg
+from algs.deer_ddim import deer_ddim_alg
 from models.dit import make_dit_diffusion_reusable
 
 # ── config ──
@@ -94,7 +97,7 @@ print(f"D={D}, T={dit_T}")
 sys.stdout.flush()
 
 # ── run all classes ──
-print(f"\n--- Running {len(class_labels)} classes x 5 methods ---")
+print(f"\n--- Running {len(class_labels)} classes x 6 methods ---")
 
 # results storage
 results = {
@@ -103,6 +106,7 @@ results = {
         "seed": dit_seed, "classes": class_labels,
     },
     "Sequential": {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}},
+    "Picard": {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}},
     "QuasiDEER": {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}},
     "Broyden": {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}},
     "AccBroyden": {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}},
@@ -148,9 +152,15 @@ def run_accbroy(dynamics, x0, guess, drivers):
     return res[1], res[2]
 
 @jax.jit
+def run_picard(dynamics, x0, guess, drivers):
+    res = picard_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                          full_trace=False, tol=tol)
+    return res[1], res[2]
+
+@jax.jit
 def run_quasi_deer(dynamics, x0, guess, drivers):
-    res = deer_alg(lambda s, d: dynamics.deer_fxn(s, d), x0, guess, drivers, max_n,
-                   quasi=True, qmem_efficient=True, full_trace=False, tol=tol)
+    res = deer_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                        num_samples=1, k=0.0, full_trace=False, tol=tol)
     return res[1], res[2]
 
 @jax.jit
@@ -161,6 +171,7 @@ def run_taa(dynamics, x0, guess, drivers):
     return res[1], res[2]
 
 methods = {
+    "Picard": run_picard,
     "QuasiDEER": run_quasi_deer,
     "Broyden": run_broyden,
     "AccBroyden": run_accbroy,
@@ -225,7 +236,7 @@ print("\n" + "=" * 60)
 print(f"  {'Class':<20s}  {'Method':<12s}  {'Iters':>5s}  {'Time':>8s}")
 print("-" * 60)
 for cls_name in class_labels:
-    for mname in ["Sequential", "QuasiDEER", "Broyden", "AccBroyden", "TAA"]:
+    for mname in ["Sequential", "Picard", "QuasiDEER", "Broyden", "AccBroyden", "TAA"]:
         iters = results[mname]["iters"][cls_name]
         rt = results[mname]["runtime"][cls_name]
         print(f"  {cls_name:<20s}  {mname:<12s}  {iters:>5d}  {rt:>7.3f}s")
@@ -234,7 +245,7 @@ print("=" * 60)
 # averages
 print(f"\n  {'AVERAGE':<20s}  {'Method':<12s}  {'Iters':>5s}  {'Time':>8s}")
 print("-" * 60)
-for mname in ["Sequential", "QuasiDEER", "Broyden", "AccBroyden", "TAA"]:
+for mname in ["Sequential", "Picard", "QuasiDEER", "Broyden", "AccBroyden", "TAA"]:
     avg_iters = np.mean(list(results[mname]["iters"].values()))
     avg_rt = np.mean(list(results[mname]["runtime"].values()))
     print(f"  {'':>20s}  {mname:<12s}  {avg_iters:>5.1f}  {avg_rt:>7.3f}s")
