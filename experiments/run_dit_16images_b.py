@@ -30,7 +30,7 @@ from algs.taa import taa_ddim_alg
 from algs.broyden_ddim import broyden_ddim_alg
 from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
 from algs.deer import deer_alg
-from models.dit import make_dit_diffusion, load_vae, decode_latent
+from models.dit import make_dit_diffusion_reusable
 
 # ── config ──
 dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
@@ -91,82 +91,88 @@ results = {
     "TAA": {"runtime": {}, "iters": {}, "lpips": {}, "latent": {}},
 }
 
-# We need to rebuild dynamics per class (different CFG conditioning).
-# This means recompilation per class. To minimize this, we compile once
-# per class (not per method — the jitted fns capture dit_dynamics which
-# changes per class).
+# ── build reusable dynamics (compile once) ──
+# The class label is a traced leaf of `dynamics`, so the jitted functions
+# below take `dynamics` as an argument and compile once for all classes.
+print("\nBuilding reusable DiT dynamics ...")
+sys.stdout.flush()
+t0 = time.time()
+set_class, _ = make_dit_diffusion_reusable(
+    dit_ckpt, T=dit_T, cfg_scale=dit_cfg, eta=0.0, seed=dit_seed,
+)
+print(f"Done in {time.time()-t0:.1f}s")
+
+# x0 and drivers are class-independent
+dynamics_0, x0, drivers = set_class(list(class_labels.values())[0])
+guess = jnp.broadcast_to(x0, (dit_T, D))
+
+@jax.jit
+def run_seq(dynamics, x0, drivers):
+    _, traj = jax.lax.scan(
+        lambda s, d: (dynamics.deer_fxn(s, d), dynamics.deer_fxn(s, d)), x0, drivers
+    )
+    return traj
+
+@jax.jit
+def run_broyden(dynamics, x0, guess, drivers):
+    res = broyden_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                           m=2, init="identity", gamma=1.0, k=0.0,
+                           full_trace=False, tol=tol,
+                           sequential_solve=False, compress="rand")
+    return res[1], res[2]
+
+@jax.jit
+def run_accbroy(dynamics, x0, guess, drivers):
+    res = accelerated_broyden_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                                       m=2, init="identity", gamma=1.0, k=0.0,
+                                       full_trace=False, tol=tol,
+                                       sequential_solve=True)
+    return res[1], res[2]
+
+@jax.jit
+def run_quasi_deer(dynamics, x0, guess, drivers):
+    res = deer_alg(lambda s, d: dynamics.deer_fxn(s, d), x0, guess, drivers, max_n,
+                   quasi=True, qmem_efficient=True, full_trace=False, tol=tol)
+    return res[1], res[2]
+
+@jax.jit
+def run_taa(dynamics, x0, guess, drivers):
+    res = taa_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                       order=6, memory_size=2, lmd=1e-3,
+                       full_trace=False, tol=tol)
+    return res[1], res[2]
+
+methods = {
+    "QuasiDEER": run_quasi_deer,
+    "Broyden": run_broyden,
+    "AccBroyden": run_accbroy,
+    "TAA": run_taa,
+}
+
+# ── compile once ──
+print("\nCompiling (one-time) ...", end=" ", flush=True)
+run_seq.lower(dynamics_0, x0, drivers).compile()
+for mfn in methods.values():
+    mfn.lower(dynamics_0, x0, guess, drivers).compile()
+print("done.")
+sys.stdout.flush()
 
 for cls_name, cls_id in class_labels.items():
     print(f"\n  == {cls_name} (class {cls_id}) ==")
     sys.stdout.flush()
 
-    # rebuild dynamics for this class
-    deer_fxn_cls, dynamics_cls, x0, drivers, _ = make_dit_diffusion(
-        dit_ckpt, T=dit_T, class_label=cls_id, cfg_scale=dit_cfg,
-        eta=0.0, seed=dit_seed,
-    )
-    guess = jnp.broadcast_to(x0, (dit_T, D))
+    dynamics_cls, _, _ = set_class(cls_id)
 
-    # define class-specific jitted functions
-    @jax.jit
-    def run_seq_cls(x0, drivers):
-        _, traj = jax.lax.scan(
-            lambda s, d: (deer_fxn_cls(s, d), deer_fxn_cls(s, d)), x0, drivers
-        )
-        return traj
-
-    @jax.jit
-    def run_broyden_cls(x0, guess, drivers):
-        res = broyden_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
-                               m=2, init="identity", gamma=1.0, k=0.0,
-                               full_trace=False, tol=tol,
-                               sequential_solve=False, compress="rand")
-        return res[1], res[2]
-
-    @jax.jit
-    def run_accbroy_cls(x0, guess, drivers):
-        res = accelerated_broyden_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
-                                           m=2, init="identity", gamma=1.0, k=0.0,
-                                           full_trace=False, tol=tol,
-                                           sequential_solve=True)
-        return res[1], res[2]
-
-    @jax.jit
-    def run_quasi_deer_cls(x0, guess, drivers):
-        res = deer_alg(deer_fxn_cls, x0, guess, drivers, max_n,
-                       quasi=True, qmem_efficient=True, full_trace=False, tol=tol)
-        return res[1], res[2]
-
-    @jax.jit
-    def run_taa_cls(x0, guess, drivers):
-        res = taa_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
-                           order=6, memory_size=2, lmd=1e-3,
-                           full_trace=False, tol=tol)
-        return res[1], res[2]
-
-    cls_methods = {
-        "QuasiDEER": run_quasi_deer_cls,
-        "Broyden": run_broyden_cls,
-        "AccBroyden": run_accbroy_cls,
-        "TAA": run_taa_cls,
-    }
-
-    # compile + warmup for this class
-    print("    compiling ...", end=" ", flush=True)
-    run_seq_cls.lower(x0, drivers).compile()
-    for mfn in cls_methods.values():
-        mfn.lower(x0, guess, drivers).compile()
     # warmup
-    _ = run_seq_cls(x0, drivers)
-    for mfn in cls_methods.values():
-        _ = mfn(x0, guess, drivers)
+    _ = run_seq(dynamics_cls, x0, drivers)
+    for mfn in methods.values():
+        _ = mfn(dynamics_cls, x0, guess, drivers)
     jax.block_until_ready(_)
-    print("done.")
 
     # --- Sequential ---
     t0 = time.time()
     for _ in range(nreps):
-        seq_result = run_seq_cls(x0, drivers)
+        seq_result = run_seq(dynamics_cls, x0, drivers)
         jax.block_until_ready(seq_result)
     t_seq = (time.time() - t0) / nreps
     seq_traj = np.array(seq_result)
@@ -176,10 +182,10 @@ for cls_name, cls_id in class_labels.items():
     print(f"    Sequential: {dit_T} steps, {t_seq:.3f}s")
 
     # --- Parallel methods ---
-    for mname, mfn in cls_methods.items():
+    for mname, mfn in methods.items():
         t0 = time.time()
         for _ in range(nreps):
-            res = mfn(x0, guess, drivers)
+            res = mfn(dynamics_cls, x0, guess, drivers)
             jax.block_until_ready(res)
         t_avg = (time.time() - t0) / nreps
         final, steps = np.array(res[0]), int(res[1])
@@ -187,9 +193,6 @@ for cls_name, cls_id in class_labels.items():
         results[mname]["iters"][cls_name] = steps
         results[mname]["latent"][cls_name] = np.array(final[-1])
         print(f"    {mname}: {steps} iters, {t_avg:.3f}s")
-
-    # free compiled programs from this class to prevent memory accumulation
-    jax.clear_caches()
     sys.stdout.flush()
 
 # ── save pkl (before loading PyTorch to avoid OOM) ──

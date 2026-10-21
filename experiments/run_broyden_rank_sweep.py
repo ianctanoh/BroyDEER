@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 
 from algs.broyden_ddim import broyden_ddim_alg
 from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
-from models.dit import make_dit_diffusion
+from models.dit import make_dit_diffusion_reusable
 
 # ── config ──
 dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
@@ -82,61 +82,70 @@ for mname in method_names:
 
 print(f"\n--- Running {len(class_labels)} classes x {len(method_names)} methods ---")
 
+# ── build reusable dynamics (compile once) ──
+set_class, _ = make_dit_diffusion_reusable(
+    dit_ckpt, T=dit_T, cfg_scale=dit_cfg, eta=0.0, seed=dit_seed,
+)
+# x0 and drivers are class-independent
+dynamics_0, x0, drivers = set_class(list(class_labels.values())[0])
+guess = jnp.broadcast_to(x0, (dit_T, D))
+
+@jax.jit
+def run_seq(dynamics, x0, drivers):
+    _, traj = jax.lax.scan(
+        lambda s, d: (dynamics.deer_fxn(s, d), dynamics.deer_fxn(s, d)), x0, drivers
+    )
+    return traj
+
+def make_run_broy(m):
+    @jax.jit
+    def run(dynamics, x0, guess, drivers):
+        res = broyden_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                               m=m, init="identity", gamma=1.0, k=0.0,
+                               full_trace=False, tol=tol,
+                               sequential_solve=False, compress="rand")
+        return res[1], res[2]
+    return run
+
+def make_run_acc(m):
+    @jax.jit
+    def run(dynamics, x0, guess, drivers):
+        res = accelerated_broyden_ddim_alg(dynamics, x0, guess, drivers, max_n,
+                                           m=m, init="identity", gamma=1.0, k=0.0,
+                                           full_trace=False, tol=tol,
+                                           sequential_solve=True)
+        return res[1], res[2]
+    return run
+
+methods = {}
+for m in ranks:
+    methods[f"Broyden_m{m}"] = make_run_broy(m)
+    methods[f"AccBroyden_m{m}"] = make_run_acc(m)
+
+# ── compile once ──
+print("\nCompiling (one-time) ...", end=" ", flush=True)
+run_seq.lower(dynamics_0, x0, drivers).compile()
+for mfn in methods.values():
+    mfn.lower(dynamics_0, x0, guess, drivers).compile()
+print("done.")
+sys.stdout.flush()
+
 for cls_name, cls_id in class_labels.items():
     print(f"\n  == {cls_name} (class {cls_id}) ==")
     sys.stdout.flush()
 
-    deer_fxn_cls, dynamics_cls, x0, drivers, _ = make_dit_diffusion(
-        dit_ckpt, T=dit_T, class_label=cls_id, cfg_scale=dit_cfg,
-        eta=0.0, seed=dit_seed,
-    )
-    guess = jnp.broadcast_to(x0, (dit_T, D))
+    dynamics_cls, _, _ = set_class(cls_id)
 
-    # sequential
-    @jax.jit
-    def run_seq_cls(x0, drivers):
-        _, traj = jax.lax.scan(
-            lambda s, d: (deer_fxn_cls(s, d), deer_fxn_cls(s, d)), x0, drivers
-        )
-        return traj
-
-    # build jitted fns per rank
-    cls_methods = {}
-    for m in ranks:
-        @jax.jit
-        def run_broy(x0, guess, drivers, _m=m):
-            res = broyden_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
-                                   m=_m, init="identity", gamma=1.0, k=0.0,
-                                   full_trace=False, tol=tol,
-                                   sequential_solve=False, compress="rand")
-            return res[1], res[2]
-
-        @jax.jit
-        def run_acc(x0, guess, drivers, _m=m):
-            res = accelerated_broyden_ddim_alg(dynamics_cls, x0, guess, drivers, max_n,
-                                               m=_m, init="identity", gamma=1.0, k=0.0,
-                                               full_trace=False, tol=tol,
-                                               sequential_solve=True)
-            return res[1], res[2]
-
-        cls_methods[f"Broyden_m{m}"] = run_broy
-        cls_methods[f"AccBroyden_m{m}"] = run_acc
-
-    # compile + warmup
-    print("    compiling ...", end=" ", flush=True)
-    run_seq_cls.lower(x0, drivers).compile()
-    for mfn in cls_methods.values():
-        mfn.lower(x0, guess, drivers).compile()
-    _ = run_seq_cls(x0, drivers)
-    for mfn in cls_methods.values():
-        _ = mfn(x0, guess, drivers)
+    # warmup
+    _ = run_seq(dynamics_cls, x0, drivers)
+    for mfn in methods.values():
+        _ = mfn(dynamics_cls, x0, guess, drivers)
     jax.block_until_ready(_)
-    print("done.")
 
     # sequential
     t0 = time.time()
     for _ in range(nreps):
-        seq_result = run_seq_cls(x0, drivers)
+        seq_result = run_seq(dynamics_cls, x0, drivers)
         jax.block_until_ready(seq_result)
     t_seq = (time.time() - t0) / nreps
     seq_traj = np.array(seq_result)
@@ -146,10 +155,10 @@ for cls_name, cls_id in class_labels.items():
     print(f"    Sequential: {dit_T} steps, {t_seq:.3f}s")
 
     # parallel methods
-    for mname, mfn in cls_methods.items():
+    for mname, mfn in methods.items():
         t0 = time.time()
         for _ in range(nreps):
-            res = mfn(x0, guess, drivers)
+            res = mfn(dynamics_cls, x0, guess, drivers)
             jax.block_until_ready(res)
         t_avg = (time.time() - t0) / nreps
         final, steps = np.array(res[0]), int(res[1])
@@ -157,8 +166,6 @@ for cls_name, cls_id in class_labels.items():
         results[mname]["iters"][cls_name] = steps
         results[mname]["latent"][cls_name] = np.array(final[-1])
         print(f"    {mname}: {steps} iters, {t_avg:.3f}s")
-
-    jax.clear_caches()
     sys.stdout.flush()
 
 # ── save pkl ──
