@@ -189,7 +189,7 @@ def _run(cfg, logger, seed, N, R, T, tau, dt, g, sigma_noise, phi,
     # Trim to a clean multiple of mini_batch
     n_used = n_groups * mini_batch
     healthy_data = healthy_data[:n_used]
-    n_healthy = n_used
+    n_healthy = len(healthy_data)  # < n_used when fewer than mini_batch chains are healthy
 
     group_Ms = []
     group_Nts = []

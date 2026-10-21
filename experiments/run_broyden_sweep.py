@@ -36,8 +36,8 @@ nreps     = 3
 save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit")
 
 # Broyden sweep parameters
-broy_gammas = [1.2, 1.5]
-broy_ranks  = [2]
+broy_gammas = [0.2, 0.4, 0.6, 0.8, 1.0]
+broy_ranks  = [2, 4, 6]
 
 class_labels = {
     "goldfish": 1,
@@ -187,7 +187,7 @@ for cls_name, cls_id in class_labels.items():
 
 # ── save pkl ──
 os.makedirs(save_dir, exist_ok=True)
-pkl_path = os.path.join(save_dir, "broyden_sweep_highgamma_a.pkl")
+pkl_path = os.path.join(save_dir, "broyden_sweep_a.pkl")
 with open(pkl_path, "wb") as f:
     pickle.dump(results, f)
 print(f"\nSaved results to {pkl_path}")
