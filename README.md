@@ -85,8 +85,8 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | TODO | S_N word problem | `python harness_sn_word.py -m alg=seq,deer,quasi N=5,15,30`<br>`python harness_sn_word.py -m alg=accelerated_broyden N=<N> acc_m=<m list>` (N=5: `1,3,4,5`; N=15: `5,10,12,13,15`; N=30: `1,3,5,10,15,20,30`) |
 | TODO | DiT-XL/2 DDIM: solver comparison | `python run_dit_taa.py` |
 | TODO | DiT-XL/2: Broyden / Accelerated Broyden / TAA hyperparameter sweeps | `python run_dit_broyden_sweep.py`, `python run_dit_accel_broyden_sweep.py`, `python run_dit_taa_sweep.py` |
-| TODO | DiT-XL/2: 32 ImageNet classes (batches A and B) | `python run_dit_16images.py`, `python run_dit_16images_b.py`, then `python compute_lpips.py` |
-| TODO | DiT-XL/2: per-class sweeps (batches A and B) | `python run_{broyden_sweep,broyden_rank_sweep,taa_sweep,picard_deer_sweep}.py` and the matching `*_b.py`, then `python compute_lpips.py --pkl <results>.pkl` |
+| TODO | DiT-XL/2: 32 ImageNet classes | `python run_dit_32images.py`, then `python compute_lpips.py` |
+| TODO | DiT-XL/2: Picard / QuasiDEER and hyperparameter sweeps (32 ImageNet classes) | `python run_{picard_deer_sweep,broyden_sweep,broyden_rank_sweep,taa_sweep}.py`, then `python compute_lpips.py --pkl <results>.pkl` |
 | TODO | DiT-XL/2: multi-GPU Broyden-DEER | `python run_dit_broyden_multigpu.py` |
 | TODO | DiT-XL/2: per-iteration convergence images | `python run_gorilla_trace.py` |
 

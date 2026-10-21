@@ -1,7 +1,7 @@
 """
 compute_lpips.py
 
-Post-processing script: loads pkl files from run_dit_16images.py,
+Post-processing script: loads pkl files from run_dit_32images.py,
 decodes latents via VAE, computes LPIPS, saves images, and updates pkl.
 
 No JAX needed — pure PyTorch + numpy.
@@ -28,8 +28,7 @@ from models.dit import load_vae, decode_latent
 # ── args ──
 parser = argparse.ArgumentParser()
 parser.add_argument("--pkl", nargs="+", default=[
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit", "dit_16images_results.pkl"),
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit", "dit_16images_b_results.pkl"),
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit", "dit_32images_results.pkl"),
 ])
 args = parser.parse_args()
 
@@ -56,7 +55,7 @@ for pkl_path in args.pkl:
 
     class_labels = results["config"]["classes"]
     save_dir = os.path.dirname(pkl_path)
-    img_dir = os.path.join(save_dir, "16images")
+    img_dir = os.path.join(save_dir, "32images")
     os.makedirs(img_dir, exist_ok=True)
 
     method_names = [k for k in results if k != "config"]

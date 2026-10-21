@@ -1,11 +1,11 @@
 """
 run_taa_sweep.py
 
-Sweep TAA order k and memory m on 16 ImageNet classes (batch A).
+Sweep TAA order k and memory m on 32 ImageNet classes.
 Uses make_dit_diffusion_reusable to compile once.
 
 Usage:
-    sbatch run_taa_sweep.sh
+    python run_taa_sweep.py
 """
 
 import sys, os
@@ -39,6 +39,7 @@ taa_orders = [5, 15, 25, 35, 45, 50]
 taa_mems   = [2, 4]
 
 class_labels = {
+    # batch A
     "goldfish": 1,
     "tiger": 292,
     "zebra": 340,
@@ -55,6 +56,23 @@ class_labels = {
     "jellyfish": 107,
     "koala": 105,
     "arctic_fox": 279,
+    # batch B
+    "king_penguin": 145,
+    "toucan": 96,
+    "tree_frog": 31,
+    "chameleon": 47,
+    "coral_reef_fish": 392,
+    "hammerhead_shark": 4,
+    "sea_turtle": 33,
+    "dalmatian": 251,
+    "siamese_cat": 284,
+    "cheetah": 293,
+    "brown_bear": 294,
+    "bison": 347,
+    "hippopotamus": 344,
+    "orangutan": 365,
+    "macaw": 88,
+    "ladybug": 301,
 }
 
 print(f"Device: {jax.devices()}")
@@ -189,7 +207,7 @@ for cls_name, cls_id in class_labels.items():
 
 # ── save pkl ──
 os.makedirs(save_dir, exist_ok=True)
-pkl_path = os.path.join(save_dir, "taa_sweep_a.pkl")
+pkl_path = os.path.join(save_dir, "taa_sweep_32images.pkl")
 with open(pkl_path, "wb") as f:
     pickle.dump(results, f)
 print(f"\nSaved results to {pkl_path}")

@@ -1,12 +1,12 @@
 """
 run_broyden_sweep.py
 
-Sweep Broyden gamma={0.2,0.4,0.6,0.8,1.0} and rank m={2,4,6} on 16 classes (batch A).
+Sweep Broyden gamma={0.2,0.4,0.6,0.8,1.0} and rank m={2,4,6} on 32 ImageNet classes.
 Identity init, rand compression, no damping (k=0).
 Uses make_dit_diffusion_reusable to compile once.
 
 Usage:
-    sbatch run_broyden_sweep.sh
+    python run_broyden_sweep.py
 """
 
 import sys, os
@@ -40,6 +40,7 @@ broy_gammas = [0.2, 0.4, 0.6, 0.8, 1.0]
 broy_ranks  = [2, 4, 6]
 
 class_labels = {
+    # batch A
     "goldfish": 1,
     "tiger": 292,
     "zebra": 340,
@@ -56,6 +57,23 @@ class_labels = {
     "jellyfish": 107,
     "koala": 105,
     "arctic_fox": 279,
+    # batch B
+    "king_penguin": 145,
+    "toucan": 96,
+    "tree_frog": 31,
+    "chameleon": 47,
+    "coral_reef_fish": 392,
+    "hammerhead_shark": 4,
+    "sea_turtle": 33,
+    "dalmatian": 251,
+    "siamese_cat": 284,
+    "cheetah": 293,
+    "brown_bear": 294,
+    "bison": 347,
+    "hippopotamus": 344,
+    "orangutan": 365,
+    "macaw": 88,
+    "ladybug": 301,
 }
 
 print(f"Device: {jax.devices()}")
@@ -187,7 +205,7 @@ for cls_name, cls_id in class_labels.items():
 
 # ── save pkl ──
 os.makedirs(save_dir, exist_ok=True)
-pkl_path = os.path.join(save_dir, "broyden_sweep_a.pkl")
+pkl_path = os.path.join(save_dir, "broyden_sweep_32images.pkl")
 with open(pkl_path, "wb") as f:
     pickle.dump(results, f)
 print(f"\nSaved results to {pkl_path}")
