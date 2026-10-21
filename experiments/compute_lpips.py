@@ -7,7 +7,7 @@ decodes latents via VAE, computes LPIPS, saves images, and updates pkl.
 No JAX needed — pure PyTorch + numpy.
 
 Usage:
-    python compute_lpips.py [--pkl PATH] [--pkl2 PATH]
+    python compute_lpips.py [--pkl PATH [PATH ...]]
 """
 
 import sys, os
