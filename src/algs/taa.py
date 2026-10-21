@@ -268,6 +268,7 @@ def taa_ddim_alg(
     Ts: Optional[jnp.ndarray] = None,
     reset: bool = False,
     tol: float = 5e-4,
+    gram_dtype=None,
 ):
     """
     DDIM-specific Triangular Anderson Acceleration with multi-step lookahead.
@@ -352,6 +353,9 @@ def taa_ddim_alg(
         Ts            : optional checkpoints for multi-T convergence reporting
         reset         : if True, replace NaN entries by states_guess
         tol           : convergence tolerance on the merit function
+        gram_dtype    : dtype for accumulating and solving the Gram system in
+                        the no-window path (e.g. jnp.float64, as ParaTAA;
+                        needs JAX x64). None (default) uses the states' dtype.
 
     Returns:
         7-tuple matching deer_alg / taa_alg:
@@ -423,8 +427,8 @@ def taa_ddim_alg(
     z_per_s = drivers[:, :D_dim]                                  # (T, D)
 
     # initial Anderson memory (warm-up via valid_mask, same as taa_alg)
-    samples_mem_init  = jnp.zeros((m, T, D_dim))
-    residual_mem_init = jnp.zeros((m, T, D_dim))
+    samples_mem_init  = jnp.zeros((m, T, D_dim), dtype=states_guess.dtype)
+    residual_mem_init = jnp.zeros((m, T, D_dim), dtype=states_guess.dtype)
 
     # ===== sliding-window code path (ParaTAA front advancement) =====
     if window_size is not None:
@@ -725,8 +729,12 @@ def taa_ddim_alg(
             dS = samples_mem[1:]  - samples_mem[:-1]                # (m-1, T, D)
             dR = residual_mem[1:] - residual_mem[:-1]               # (m-1, T, D)
 
-            gram_per_t = jnp.einsum("itd,ptd->ipt", dR, dR)         # (m-1, m-1, T)
-            d_per_t    = jnp.einsum("itd,td->it",  dR, r_old)       # (m-1, T)
+            # Optionally accumulate the Gram system and solve it in a wider
+            # dtype (e.g. float64, as ParaTAA does); None keeps states' dtype.
+            dR_g    = dR    if gram_dtype is None else dR.astype(gram_dtype)
+            r_old_g = r_old if gram_dtype is None else r_old.astype(gram_dtype)
+            gram_per_t = jnp.einsum("itd,ptd->ipt", dR_g, dR_g)     # (m-1, m-1, T)
+            d_per_t    = jnp.einsum("itd,td->it",  dR_g, r_old_g)   # (m-1, T)
 
             gram_cum = jnp.flip(
                 jnp.cumsum(jnp.flip(gram_per_t, axis=2), axis=2), axis=2
@@ -751,6 +759,7 @@ def taa_ddim_alg(
             gram_t = jnp.transpose(gram_reg, (2, 0, 1))             # (T, m-1, m-1)
             d_t    = jnp.transpose(d_cum,    (1, 0))                # (T, m-1)
             c = vmap(jnp.linalg.solve)(gram_t, d_t)                 # (T, m-1)
+            c = c.astype(states.dtype)
 
             A_blocks = dS + dR                                      # (m-1, T, D)
             Gf = jnp.einsum("tj,jtd->td", c, A_blocks)              # (T, D)

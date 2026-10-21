@@ -86,6 +86,7 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | TODO | DiT-XL/2 DDIM: solver comparison | `python run_dit_taa.py` |
 | TODO | DiT-XL/2: Broyden / Accelerated Broyden / TAA hyperparameter sweeps | `python run_dit_broyden_sweep.py`, `python run_dit_accel_broyden_sweep.py`, `python run_dit_taa_sweep.py` |
 | TODO | DiT-XL/2: Picard, QuasiDEER, Broyden, Accelerated Broyden and TAA on 32 ImageNet classes | `python run_dit_32images.py`, then `python compute_lpips.py` |
+| TODO | DiT-XL/2: TAA with float64 Gram accumulation/solve (ParaTAA precision) vs float32, 32 classes | `python run_dit_taa_gram64.py` |
 | TODO | DiT-XL/2: Broyden, rank and TAA hyperparameter sweeps (32 ImageNet classes) | `python run_{broyden_sweep,broyden_rank_sweep,taa_sweep}.py`, then `python compute_lpips.py --pkl <results>.pkl` |
 | TODO | DiT-XL/2: multi-GPU Broyden-DEER | `python run_dit_broyden_multigpu.py` |
 | TODO | DiT-XL/2: per-iteration convergence images | `python run_gorilla_trace.py` |
