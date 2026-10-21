@@ -29,6 +29,7 @@ from jax import vmap
 from jax.lax import scan
 
 from .deer import merit_fxn
+from .ddim_utils import merit_from_residual
 from .broyden_deer import (
     broyden_solve,
     diagonal_solve,
@@ -215,8 +216,9 @@ def broyden_ddim_alg(
                 gamma_vec, delta_s, r_old, r_new, m, iteration, d_init
             )
 
-        # convergence check -- ONE more eps vmap
-        mf_val = merit_fxn(f_local, initial_state, states, drivers)
+        # convergence check on pre-update states: r_old is their residual
+        # (computed last step), so no extra eps vmap
+        mf_val = merit_from_residual(r_old)
 
         return (new_states, U_new, V_new, gamma_new, r_new,
                 is_nan, iteration + 1), \

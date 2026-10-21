@@ -19,6 +19,7 @@ from jax import vmap
 from jax.lax import scan
 
 from .deer import merit_fxn
+from .ddim_utils import merit_from_residual
 
 
 def picard_ddim_alg(
@@ -110,9 +111,9 @@ def picard_ddim_alg(
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
 
-        # Convergence check — ONE more eps vmap (inside merit_fxn).
+        # Convergence check: merit reuses the eps evaluation already made in this step (no extra eps vmap).
         # Evaluated on pre-update states (same convention as broyden_ddim).
-        mf_val = merit_fxn(f_local, initial_state, states, drivers)
+        mf_val = merit_from_residual(states - f_vals)
 
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 

@@ -33,6 +33,7 @@ from jax import vmap
 from jax.lax import scan
 
 from .deer import get_residual, merit_fxn
+from .ddim_utils import merit_from_residual
 
 
 def taa_alg(
@@ -763,8 +764,12 @@ def taa_ddim_alg(
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
 
-        # Convergence is judged on the canonical single-step fixed point.
-        mf_val = merit_fxn(f_local, initial_state, states, drivers)
+        # Convergence is judged on the canonical single-step fixed point,
+        # using the eps evaluation already made above (no extra eps vmap).
+        f_vals = (a_per_s[:, None] * X[:T]
+                  + b_per_s[:, None] * eps_arr
+                  + n_per_s[:, None] * z_per_s)
+        mf_val = merit_from_residual(states - f_vals)
         return (new_states, samples_mem, residual_mem, is_nan, iteration + 1), \
                (new_states, nan_mask, mf_val)
 
