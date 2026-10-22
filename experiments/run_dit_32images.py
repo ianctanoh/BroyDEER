@@ -9,7 +9,12 @@ Methods (all DDIM-specific solvers, same convergence check):
   2. QuasiDEER:    Hutchinson diagonal, 1 sample
   3. Broyden:      m=2, gamma=1.0, identity
   4. AccBroyden:   m=2, gamma=1.0, identity
-  5. TAA:          k=6, m=2
+  5. TAA:          k=6, m=2, Gram system accumulated/solved in float64 (as
+                   ParaTAA); everything else float32. Only TAA is traced and
+                   run under jax.experimental.enable_x64.
+
+Stopping: merit < tol = 0.1 (outputs at the float32 agreement floor with
+sequential sampling), max_n = 100.
 
 Usage:
     python run_dit_32images.py
@@ -34,6 +39,7 @@ from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
 from algs.picard_ddim import picard_ddim_alg
 from algs.deer_ddim import deer_ddim_alg
 from models.dit import make_dit_diffusion_reusable
+from jax.experimental import enable_x64
 
 # ── config ──
 dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
@@ -41,8 +47,8 @@ dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 dit_T     = 50
 dit_cfg   = 5.0
 dit_seed  = 0
-max_n     = 50
-tol       = 1.0
+max_n     = 100
+tol       = 0.1
 nwarmups  = 2
 nreps     = 3
 save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit")
@@ -163,12 +169,25 @@ def run_quasi_deer(dynamics, x0, guess, drivers):
                         num_samples=1, k=0.0, full_trace=False, tol=tol)
     return res[1], res[2]
 
+def with_x64(fn):
+    """Trace, compile and call `fn` with JAX x64 enabled (other methods unaffected)."""
+    def call(*args):
+        with enable_x64():
+            return fn(*args)
+    def lower(*args):
+        with enable_x64():
+            return fn.lower(*args)
+    call.lower = lower
+    return call
+
 @jax.jit
-def run_taa(dynamics, x0, guess, drivers):
+def _run_taa(dynamics, x0, guess, drivers):
     res = taa_ddim_alg(dynamics, x0, guess, drivers, max_n,
                        order=6, memory_size=2, lmd=1e-3,
-                       full_trace=False, tol=tol)
+                       full_trace=False, tol=tol, gram_dtype=jnp.float64)
     return res[1], res[2]
+
+run_taa = with_x64(_run_taa)   # float64 Gram/solve; states stay float32
 
 methods = {
     "Picard": run_picard,
