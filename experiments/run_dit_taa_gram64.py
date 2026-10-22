@@ -12,6 +12,8 @@ float32 runs (run_dit_32images.py) -- and x64 is switched on only afterwards,
 before the TAA functions are traced. A dtype audit of each compiled TAA
 function is printed to confirm that float64 only appears in the Gram/solve.
 
+Stopping: tol = 0.1, max_n = 100 (same as run_dit_32images.py).
+
 Usage:
     python run_dit_taa_gram64.py
 """
@@ -39,8 +41,8 @@ dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 dit_T     = 50
 dit_cfg   = 5.0
 dit_seed  = 0
-max_n     = 50
-tol       = 1.0
+max_n     = 100
+tol       = 0.1
 nwarmups  = 2
 nreps     = 3
 save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit")
