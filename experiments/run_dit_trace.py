@@ -1,7 +1,7 @@
 """
-run_gorilla_trace.py
+run_dit_trace.py
 
-Generate per-iteration images for gorilla (class 366) to visualize
+Generate per-iteration images for one ImageNet class (default gorilla, 366) to visualize
 convergence of each method. Saves one decoded image per iteration
 per method. Methods and settings match run_dit_32images.py: Picard,
 QuasiDEER, Broyden (m=2), Accelerated Broyden (m=2), TAA (k=6, m=2) with
@@ -10,10 +10,12 @@ enabled only after the other methods have run, just before TAA is traced; the
 DiT dynamics and inputs were built with x64 off and stay float32.
 
 Usage:
-    sbatch run_gorilla_trace.sh
+    python run_dit_trace.py                                  # gorilla (366)
+    python run_dit_trace.py --class_id 388 --name giant_panda   # any other class
 """
 
 import sys, os
+import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 import time
@@ -35,13 +37,17 @@ from models.dit import make_dit_diffusion, load_vae, decode_latent
 dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                          "pretrained_models", "DiT-XL-2-256x256.pt")
 dit_T     = 50
-dit_class = 366    # gorilla
+parser = argparse.ArgumentParser()
+parser.add_argument("--class_id", type=int, default=366, help="ImageNet class (default 366, gorilla)")
+parser.add_argument("--name", type=str, default="gorilla", help="label for titles and the output folder")
+args = parser.parse_args()
+dit_class = args.class_id
 dit_cfg   = 5.0
 dit_seed  = 0
 num_iters = 30     # fixed number of iterations (full trace)
 
 save_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                        "figs", "dit", "gorilla_trace")
+                        "figs", "dit", f"{args.name}_trace")
 os.makedirs(save_dir, exist_ok=True)
 
 print(f"Device: {jax.devices()}")
@@ -191,7 +197,7 @@ for row, (name, all_states) in enumerate(traces.items()):
         ax.set_yticks([])
 
 fig.suptitle(
-    f"Gorilla (class {dit_class})  |  T={dit_T}, cfg={dit_cfg}  |  {num_iters} iters",
+    f"{args.name.replace('_', ' ').capitalize()} (class {dit_class})  |  T={dit_T}, cfg={dit_cfg}  |  {num_iters} iters",
     fontsize=12, y=1.01,
 )
 plt.tight_layout()
