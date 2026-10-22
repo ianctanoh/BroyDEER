@@ -85,7 +85,7 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | TODO | S_N word problem | `python harness_sn_word.py -m alg=seq,deer,quasi N=5,15,30`<br>`python harness_sn_word.py -m alg=accelerated_broyden N=<N> acc_m=<m list>` (N=5: `1,3,4,5`; N=15: `5,10,12,13,15`; N=30: `1,3,5,10,15,20,30`) |
 | TODO | DiT-XL/2: Picard, QuasiDEER, Broyden, Accelerated Broyden and TAA on 32 ImageNet classes | `python run_dit_32images.py`, then `python compute_lpips.py` |
 | TODO | DiT-XL/2: TAA with float64 Gram accumulation/solve (ParaTAA precision) vs float32, 32 classes | `python run_dit_taa_gram64.py` |
-| TODO | DiT-XL/2: Broyden, rank and TAA hyperparameter sweeps (32 ImageNet classes) | `python run_{broyden_sweep,broyden_rank_sweep,taa_sweep}.py`, then `python compute_lpips.py --pkl <results>.pkl` |
+| TODO | DiT-XL/2: Broyden and TAA hyperparameter sweeps (32 ImageNet classes) | `python run_{broyden_sweep,taa_sweep}.py`, then `python compute_lpips.py --pkl <results>.pkl` |
 | TODO | DiT-XL/2: per-iteration convergence images | `python run_gorilla_trace.py` |
 
 The DiT scripts write their results to `figs/dit/`. Exploratory notebooks are
