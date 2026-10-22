@@ -3,7 +3,11 @@ run_gorilla_trace.py
 
 Generate per-iteration images for gorilla (class 366) to visualize
 convergence of each method. Saves one decoded image per iteration
-per method.
+per method. Methods and settings match run_dit_32images.py: Picard,
+QuasiDEER, Broyden (m=2), Accelerated Broyden (m=2), TAA (k=6, m=2) with
+its Gram system accumulated and solved in float64 (as ParaTAA). JAX x64 is
+enabled only after the other methods have run, just before TAA is traced; the
+DiT dynamics and inputs were built with x64 off and stay float32.
 
 Usage:
     sbatch run_gorilla_trace.sh
@@ -21,6 +25,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from algs.taa import taa_ddim_alg
+from algs.picard_ddim import picard_ddim_alg
+from algs.deer_ddim import deer_ddim_alg
 from algs.broyden_ddim import broyden_ddim_alg
 from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
 from models.dit import make_dit_diffusion, load_vae, decode_latent
@@ -75,11 +81,26 @@ print("  Sequential done.")
 
 # ── methods with full_trace ──
 
-# TAA (order=4, m=2)
+# Picard
+@jax.jit
+def run_picard_trace(x0, guess, drivers):
+    res = picard_ddim_alg(dit_dynamics, x0, guess, drivers, num_iters,
+                          full_trace=True)
+    return res[0]  # all_states: (num_iters+1, T, D)
+
+# QuasiDEER (Hutchinson diagonal, 1 sample)
+@jax.jit
+def run_quasi_deer_trace(x0, guess, drivers):
+    res = deer_ddim_alg(dit_dynamics, x0, guess, drivers, num_iters,
+                        num_samples=1, k=0.0, full_trace=True)
+    return res[0]  # all_states: (num_iters+1, T, D)
+
+# TAA (order=6, m=2), float64 Gram/solve -- traced only after x64 is enabled
 @jax.jit
 def run_taa_trace(x0, guess, drivers):
     res = taa_ddim_alg(dit_dynamics, x0, guess, drivers, num_iters,
-                       order=4, memory_size=2, lmd=1e-3, full_trace=True)
+                       order=6, memory_size=2, lmd=1e-3, full_trace=True,
+                       gram_dtype=jnp.float64)
     return res[0]  # all_states: (num_iters+1, T, D)
 
 # Broyden (m=2)
@@ -99,19 +120,24 @@ def run_accel_trace(x0, guess, drivers):
     return res[0]  # all_states: (num_iters+1, T, D)
 
 methods = [
-    ("TAA", run_taa_trace),
+    ("Picard", run_picard_trace),
+    ("QuasiDEER", run_quasi_deer_trace),
     ("Broyden", run_broyden_trace),
     ("AccBroyden", run_accel_trace),
+    ("TAA", run_taa_trace),
 ]
 
 traces = {}
 for name, fn in methods:
+    if name == "TAA":
+        # float64 needs x64; everything traced so far stays float32
+        jax.config.update("jax_enable_x64", True)
     print(f"\n{name}: compiling ...", end=" ", flush=True)
     fn.lower(dit_x0, dit_guess, dit_drivers).compile()
     print("running ...", end=" ", flush=True)
     all_states = np.array(fn(dit_x0, dit_guess, dit_drivers))
     traces[name] = all_states
-    print(f"done. Shape: {all_states.shape}")
+    print(f"done. Shape: {all_states.shape}, dtype: {all_states.dtype}")
     sys.stdout.flush()
 
 # ── decode + save images ──
