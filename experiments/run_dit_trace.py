@@ -1,7 +1,7 @@
 """
 run_dit_trace.py
 
-Generate per-iteration images for one ImageNet class (default gorilla, 366) to visualize
+Generate per-iteration images for one ImageNet class (default orangutan, 365) to visualize
 convergence of each method. Saves one decoded image per iteration
 per method. Methods and settings match run_dit_32images.py: Picard,
 QuasiDEER, Broyden (m=2), Accelerated Broyden (m=2), TAA (k=10, m=2) with
@@ -38,8 +38,8 @@ dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                          "pretrained_models", "DiT-XL-2-256x256.pt")
 dit_T     = 50
 parser = argparse.ArgumentParser()
-parser.add_argument("--class_id", type=int, default=366, help="ImageNet class (default 366, gorilla)")
-parser.add_argument("--name", type=str, default="gorilla", help="label for titles and the output folder")
+parser.add_argument("--class_id", type=int, default=365, help="ImageNet class (default 365, orangutan)")
+parser.add_argument("--name", type=str, default="orangutan", help="label for titles and the output folder")
 args = parser.parse_args()
 dit_class = args.class_id
 dit_cfg   = 5.0

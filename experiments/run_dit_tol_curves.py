@@ -195,9 +195,9 @@ def run_traces(pkl_path):
             results[mname]["latents"][cls_name] = lat
             results[mname]["merit"][cls_name] = merit
             results[mname]["time_per_iter"][cls_name] = dt / max_n
-            below = np.nonzero(merit < 1.0)[0]
-            it1 = int(below[0]) + 1 if below.size else None
-            print(f"    {mname}: iters@tol=1.0 {it1}, final merit {merit[-1]:.3e}, "
+            below = np.nonzero(merit < 0.1)[0]
+            it01 = int(below[0]) + 1 if below.size else None
+            print(f"    {mname}: iters@tol=0.1 {it01}, final merit {merit[-1]:.3e}, "
                   f"{dt / max_n:.3f}s/iter")
         sys.stdout.flush()
 

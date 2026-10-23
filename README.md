@@ -87,7 +87,7 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | TODO | DiT-XL/2: TAA with float64 Gram accumulation/solve (ParaTAA precision) vs float32, 32 classes | `python run_dit_taa_gram64.py` |
 | TODO | DiT-XL/2: Broyden and TAA hyperparameter sweeps (32 ImageNet classes) | `python run_{broyden_sweep,taa_sweep}.py`, then `python compute_lpips.py --pkl <results>.pkl` |
 | TODO | DiT-XL/2: tolerance study (residual and LPIPS vs sequential at every iteration) | `python run_dit_tol_curves.py`, then `python run_dit_tol_curves.py --lpips` |
-| TODO | DiT-XL/2: per-iteration convergence images | `python run_dit_trace.py --class_id <id> --name <name>` (default: gorilla, 366) |
+| TODO | DiT-XL/2: per-iteration convergence images | `python run_dit_trace.py --class_id <id> --name <name>` (default: orangutan, 365) |
 
 The DiT scripts write their results to `figs/dit/`. Exploratory notebooks are
 in `nbs/`.
