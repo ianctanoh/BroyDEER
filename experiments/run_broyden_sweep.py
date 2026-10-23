@@ -4,6 +4,7 @@ run_broyden_sweep.py
 Sweep Broyden gamma={0.2,0.4,0.6,0.8,1.0} and rank m={2,4,6} on 32 ImageNet classes.
 Identity init, rand compression, no damping (k=0).
 Uses make_dit_diffusion_reusable to compile once.
+Stopping: tol = 0.1, max_n = 100 (same as run_dit_32images.py).
 
 Usage:
     python run_broyden_sweep.py
@@ -29,8 +30,8 @@ dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 dit_T     = 50
 dit_cfg   = 5.0
 dit_seed  = 0
-max_n     = 50
-tol       = 1.0
+max_n     = 100
+tol       = 0.1
 nwarmups  = 2
 nreps     = 3
 save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit")

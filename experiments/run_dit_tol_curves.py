@@ -9,8 +9,12 @@ sequential sample at any iteration, can then be computed after the fact.
 
 Iteration convention (same as the early-stopping solvers): each step reports
 the merit of the states *before* its update, so the solver run with tolerance
-tol stops after  min{j : merit[j] < tol} + 1  steps. At tol = 1.0 this must
+tol stops after  min{j : merit[j] < tol} + 1  steps. At tol = 0.1 this must
 reproduce the iteration counts of run_dit_32images.py.
+
+TAA uses k=10, m=2 with its Gram system accumulated/solved in float64 (as in
+run_dit_32images.py); only TAA is traced and run under
+jax.experimental.enable_x64, so DiT and the trajectory stay float32.
 
 Two phases, run as separate processes (JAX, then PyTorch):
     python run_dit_tol_curves.py                     # JAX: traces -> pkl
@@ -36,7 +40,7 @@ save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "di
 pkl_default = os.path.join(save_dir, "dit_tol_curves.pkl")
 
 # iterations at which LPIPS vs sequential is computed in the --lpips phase
-lpips_iters = [3, 5, 8, 10, 12, 13, 15, 18, 20, 22, 25, 30, 40, 50]
+lpips_iters = [3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 25, 30, 40, 50]
 
 # 32 ImageNet animal classes (same order as run_dit_32images.py)
 class_labels = {
@@ -89,6 +93,7 @@ def run_traces(pkl_path):
     from algs.accelerated_broyden_ddim import accelerated_broyden_ddim_alg
     from algs.taa import taa_ddim_alg
     from models.dit import make_dit_diffusion_reusable
+    from jax.experimental import enable_x64
 
     print(f"Device: {jax.devices()}")
     print(f"T={dit_T}, cfg={dit_cfg}, max_n={max_n} (fixed, full trace)")
@@ -136,10 +141,18 @@ def run_traces(pkl_path):
                                                   full_trace=True, sequential_solve=True))
 
     @jax.jit
-    def run_taa(dynamics, x0, guess, drivers):
+    def _run_taa(dynamics, x0, guess, drivers):
         return trace(taa_ddim_alg(dynamics, x0, guess, drivers, max_n,
-                                  order=6, memory_size=2, lmd=1e-3,
-                                  full_trace=True))
+                                  order=10, memory_size=2, lmd=1e-3,
+                                  full_trace=True, gram_dtype=jnp.float64))
+
+    def run_taa(*args):                      # float64 Gram: trace/run under x64 only
+        with enable_x64():
+            return _run_taa(*args)
+    def _lower(*args):
+        with enable_x64():
+            return _run_taa.lower(*args)
+    run_taa.lower = _lower
 
     methods = {
         "Picard": run_picard,

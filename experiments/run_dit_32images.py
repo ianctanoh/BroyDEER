@@ -9,7 +9,7 @@ Methods (all DDIM-specific solvers, same convergence check):
   2. QuasiDEER:    Hutchinson diagonal, 1 sample
   3. Broyden:      m=2, gamma=1.0, identity
   4. AccBroyden:   m=2, gamma=1.0, identity
-  5. TAA:          k=6, m=2, Gram system accumulated/solved in float64 (as
+  5. TAA:          k=10, m=2, Gram system accumulated/solved in float64 (as
                    ParaTAA); everything else float32. Only TAA is traced and
                    run under jax.experimental.enable_x64.
 
@@ -183,7 +183,7 @@ def with_x64(fn):
 @jax.jit
 def _run_taa(dynamics, x0, guess, drivers):
     res = taa_ddim_alg(dynamics, x0, guess, drivers, max_n,
-                       order=6, memory_size=2, lmd=1e-3,
+                       order=10, memory_size=2, lmd=1e-3,
                        full_trace=False, tol=tol, gram_dtype=jnp.float64)
     return res[1], res[2]
 

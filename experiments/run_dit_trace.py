@@ -4,7 +4,7 @@ run_dit_trace.py
 Generate per-iteration images for one ImageNet class (default gorilla, 366) to visualize
 convergence of each method. Saves one decoded image per iteration
 per method. Methods and settings match run_dit_32images.py: Picard,
-QuasiDEER, Broyden (m=2), Accelerated Broyden (m=2), TAA (k=6, m=2) with
+QuasiDEER, Broyden (m=2), Accelerated Broyden (m=2), TAA (k=10, m=2) with
 its Gram system accumulated and solved in float64 (as ParaTAA). JAX x64 is
 enabled only after the other methods have run, just before TAA is traced; the
 DiT dynamics and inputs were built with x64 off and stay float32.
@@ -101,11 +101,11 @@ def run_quasi_deer_trace(x0, guess, drivers):
                         num_samples=1, k=0.0, full_trace=True)
     return res[0]  # all_states: (num_iters+1, T, D)
 
-# TAA (order=6, m=2), float64 Gram/solve -- traced only after x64 is enabled
+# TAA (order=10, m=2), float64 Gram/solve -- traced only after x64 is enabled
 @jax.jit
 def run_taa_trace(x0, guess, drivers):
     res = taa_ddim_alg(dit_dynamics, x0, guess, drivers, num_iters,
-                       order=6, memory_size=2, lmd=1e-3, full_trace=True,
+                       order=10, memory_size=2, lmd=1e-3, full_trace=True,
                        gram_dtype=jnp.float64)
     return res[0]  # all_states: (num_iters+1, T, D)
 

@@ -1,7 +1,7 @@
 """
 run_dit_taa_gram64.py
 
-TAA (k=6, m=2) on the same 32 ImageNet classes as run_dit_32images.py, with
+TAA (k=10, m=2) on the same 32 ImageNet classes as run_dit_32images.py, with
 the Anderson Gram system accumulated and solved in float64 (as ParaTAA does)
 while everything else -- DiT, DDIM dynamics, trajectory -- stays float32.
 Standard float32 TAA is run alongside as a control.
@@ -120,7 +120,7 @@ def make_run_taa(gram_dtype):
     @jax.jit
     def run(dynamics, x0, guess, drivers):
         res = taa_ddim_alg(dynamics, x0, guess, drivers, max_n,
-                           order=6, memory_size=2, lmd=1e-3,
+                           order=10, memory_size=2, lmd=1e-3,
                            full_trace=False, tol=tol, gram_dtype=gram_dtype)
         return res[1], res[2]
     return run
@@ -156,7 +156,7 @@ results = {
     "config": {
         "T": dit_T, "cfg": dit_cfg, "tol": tol, "max_n": max_n,
         "seed": dit_seed, "classes": class_labels,
-        "taa": {"order": 6, "memory_size": 2, "lmd": 1e-3},
+        "taa": {"order": 10, "memory_size": 2, "lmd": 1e-3},
     },
 }
 for mname in ["Sequential", *methods]:

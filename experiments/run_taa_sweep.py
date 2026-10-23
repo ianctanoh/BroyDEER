@@ -3,6 +3,10 @@ run_taa_sweep.py
 
 Sweep TAA order k and memory m on 32 ImageNet classes.
 Uses make_dit_diffusion_reusable to compile once.
+TAA accumulates and solves its Gram system in float64 (as ParaTAA and as in
+run_dit_32images.py); only TAA is traced and run under
+jax.experimental.enable_x64, so DiT and the trajectory stay float32.
+Stopping: tol = 0.1, max_n = 100 (same as run_dit_32images.py).
 
 Usage:
     python run_taa_sweep.py
@@ -21,6 +25,7 @@ matplotlib.use("Agg")
 
 from algs.taa import taa_ddim_alg
 from models.dit import make_dit_diffusion_reusable
+from jax.experimental import enable_x64
 
 # ── config ──
 dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
@@ -28,14 +33,14 @@ dit_ckpt  = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 dit_T     = 50
 dit_cfg   = 5.0
 dit_seed  = 0
-max_n     = 50
-tol       = 1.0
+max_n     = 100
+tol       = 0.1
 nwarmups  = 2
 nreps     = 3
 save_dir  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "figs", "dit")
 
 # TAA sweep parameters
-taa_orders = [5, 15, 25, 35, 45, 50]
+taa_orders = [2, 4, 5, 6, 8, 10, 12, 14, 15, 25, 35, 45, 50]
 taa_mems   = [2, 4]
 
 class_labels = {
@@ -120,14 +125,25 @@ def run_seq(dynamics, x0, drivers):
     return traj
 
 
+def with_x64(fn):
+    """Trace, compile and call `fn` with JAX x64 enabled (sequential unaffected)."""
+    def call(*args):
+        with enable_x64():
+            return fn(*args)
+    def lower(*args):
+        with enable_x64():
+            return fn.lower(*args)
+    call.lower = lower
+    return call
+
 def make_run_taa(k, m):
     @jax.jit
     def run(dynamics, x0, guess, drivers):
         res = taa_ddim_alg(dynamics, x0, guess, drivers, max_n,
                            order=k, memory_size=m, lmd=1e-3,
-                           full_trace=False, tol=tol)
+                           full_trace=False, tol=tol, gram_dtype=jnp.float64)
         return res[1], res[2]
-    return run
+    return with_x64(run)   # float64 Gram/solve; states stay float32
 
 taa_fns = {}
 for k in taa_orders:
@@ -156,7 +172,7 @@ results = {
     "config": {
         "T": dit_T, "cfg": dit_cfg, "tol": tol, "max_n": max_n,
         "seed": dit_seed, "classes": class_labels,
-        "taa_orders": taa_orders, "taa_mems": taa_mems,
+        "taa_orders": taa_orders, "taa_mems": taa_mems, "gram_dtype": "float64",
     },
 }
 for mname in method_names:
