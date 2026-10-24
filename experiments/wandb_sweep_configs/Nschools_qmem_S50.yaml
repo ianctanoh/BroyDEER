@@ -35,6 +35,8 @@ parameters:
     value: "online"
   deer_k:
     value: 0.0
+  quasi_k:
+    value: 0.0
   bd_m:
     value: 2
   bd_init:

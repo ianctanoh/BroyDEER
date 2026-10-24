@@ -33,43 +33,17 @@ DEFAULT_ALPHA_0   = 0.1
 DEFAULT_SIGMASQ_0 = 10.0
 
 
-def make_eight_schools(S=S, N_s=N_s, x_bars=None, sigma_bars=None, seed=13,
-                       mu_0=DEFAULT_MU_0, kappa_0=DEFAULT_KAPPA_0,
-                       nu_0=DEFAULT_NU_0, tausq_0=DEFAULT_TAUSQ_0,
-                       alpha_0=DEFAULT_ALPHA_0, sigmasq_0=DEFAULT_SIGMASQ_0):
+def make_gibbs_step(S, N_s, xs, mu_0=DEFAULT_MU_0, kappa_0=DEFAULT_KAPPA_0,
+                    nu_0=DEFAULT_NU_0, tausq_0=DEFAULT_TAUSQ_0,
+                    alpha_0=DEFAULT_ALPHA_0, sigmasq_0=DEFAULT_SIGMASQ_0):
     """
-    Create the eight schools Gibbs sampler dynamics function.
+    Gibbs-sampler step (state, driver) -> new_state for observed data xs (N_s, S).
 
-    Args:
-        S: number of schools (default 8)
-        N_s: number of students per school (default 20)
-
-    Returns:
-        deer_fxn: function (state, driver) -> new_state
-        params: dict of hyperparameters
-        xs: observed data (N_s, S)
-        D: state dimension
+    xs may be a traced array, so one jitted function can serve every dataset
+    of a given (S, N_s) instead of recompiling per dataset.
     """
-    key = jr.PRNGKey(seed)
-    if x_bars is None:
-        if S == 8:
-            x_bars = DEFAULT_X_BARS
-        else:
-            key, k1 = jr.split(key)
-            x_bars = jr.normal(k1, (S,)) * 10.0
-    if sigma_bars is None:
-        if S == 8:
-            sigma_bars = DEFAULT_SIGMA_BARS
-        else:
-            key, k2 = jr.split(key)
-            sigma_bars = jnp.abs(jr.normal(k2, (S,)) * 5.0) + 5.0
-    xs_raw = tfd.Normal(x_bars, jnp.sqrt(N_s) * sigma_bars).sample((N_s,), seed=key)
-    zs     = (xs_raw - xs_raw.mean(axis=0)) / xs_raw.std(axis=0)
-    xs     = x_bars + jnp.sqrt(N_s) * sigma_bars * zs
-
     nu_N    = nu_0 + S + 1
     alpha_N = alpha_0 + N_s
-    D       = 2 * S + 2
 
     def gibbs_sample_tausq(mu, thetas, zs_):
         tausq_N = (1.0 / nu_N) * (nu_0 * tausq_0 + kappa_0 * (mu - mu_0)**2
@@ -109,6 +83,49 @@ def make_eight_schools(S=S, N_s=N_s, x_bars=None, sigma_bars=None, seed=13,
         sigmasqs = gibbs_sample_sigmasq(thetas, zs_sigmasq)
 
         return jnp.concatenate((thetas, sigmasqs, mu, tausq))
+
+    return deer_fxn
+
+
+def make_eight_schools(S=S, N_s=N_s, x_bars=None, sigma_bars=None, seed=13,
+                       mu_0=DEFAULT_MU_0, kappa_0=DEFAULT_KAPPA_0,
+                       nu_0=DEFAULT_NU_0, tausq_0=DEFAULT_TAUSQ_0,
+                       alpha_0=DEFAULT_ALPHA_0, sigmasq_0=DEFAULT_SIGMASQ_0):
+    """
+    Create the eight schools Gibbs sampler dynamics function.
+
+    Args:
+        S: number of schools (default 8)
+        N_s: number of students per school (default 20)
+
+    Returns:
+        deer_fxn: function (state, driver) -> new_state
+        params: dict of hyperparameters
+        xs: observed data (N_s, S)
+        D: state dimension
+    """
+    key = jr.PRNGKey(seed)
+    if x_bars is None:
+        if S == 8:
+            x_bars = DEFAULT_X_BARS
+        else:
+            key, k1 = jr.split(key)
+            x_bars = jr.normal(k1, (S,)) * 10.0
+    if sigma_bars is None:
+        if S == 8:
+            sigma_bars = DEFAULT_SIGMA_BARS
+        else:
+            key, k2 = jr.split(key)
+            sigma_bars = jnp.abs(jr.normal(k2, (S,)) * 5.0) + 5.0
+    xs_raw = tfd.Normal(x_bars, jnp.sqrt(N_s) * sigma_bars).sample((N_s,), seed=key)
+    zs     = (xs_raw - xs_raw.mean(axis=0)) / xs_raw.std(axis=0)
+    xs     = x_bars + jnp.sqrt(N_s) * sigma_bars * zs
+
+    deer_fxn = make_gibbs_step(S, N_s, xs, mu_0=mu_0, kappa_0=kappa_0, nu_0=nu_0,
+                               tausq_0=tausq_0, alpha_0=alpha_0, sigmasq_0=sigmasq_0)
+    nu_N    = nu_0 + S + 1
+    alpha_N = alpha_0 + N_s
+    D       = 2 * S + 2
 
     params = {
         "S": S, "N_s": N_s,

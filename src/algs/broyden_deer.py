@@ -595,8 +595,9 @@ def broyden_deer_alg(
             # keep the user-supplied gamma constant — no secant rescaling
             gamma_new = gamma
 
-        # stopping criterion: ||r||_2 / sqrt(T*D)
-        mf_val = jnp.sqrt(jnp.mean(r_old ** 2))
+        # stopping criterion: ||r||_2 / sqrt(T*D) of the updated states
+        # (r_new, after any line-search damping), as in deer/picard/jacobi
+        mf_val = jnp.sqrt(jnp.mean(r_new ** 2))
         mf_val = jnp.where(jnp.isnan(mf_val), jnp.inf, mf_val)
 
         return (new_states, U_new, V_new, P_hist_new, G_hist_new,

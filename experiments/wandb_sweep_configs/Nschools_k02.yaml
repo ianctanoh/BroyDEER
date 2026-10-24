@@ -1,5 +1,5 @@
-# N-schools sweep: S x T grid, new RMS criterion
-# k=0.2 for deer/quasi, k=0.2 for broyden/accel
+# N-schools sweep: S x T grid; all solvers stop on ||r||_2 / sqrt(T*D) < tol
+# damping: k=0.2 for deer, quasi, broyden and accelerated_broyden
 command:
   - ${env}
   - JAX_PLATFORMS=cuda
@@ -33,6 +33,8 @@ parameters:
   mode:
     value: "online"
   deer_k:
+    value: 0.2
+  quasi_k:
     value: 0.2
   bd_m:
     value: 2

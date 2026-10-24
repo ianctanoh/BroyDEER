@@ -177,6 +177,13 @@ def stopping_criterion(r):
     return jnp.where(jnp.isnan(val), jnp.inf, val)
 
 
+def convergence_err(f, initial_state, states, drivers, stopping="merit"):
+    """Quantity compared to tol: RMS residual ("rms") or merit_fxn ("merit")."""
+    if stopping == "rms":
+        return stopping_criterion(get_residual(f, initial_state, states, drivers))
+    return merit_fxn(f, initial_state, states, drivers)
+
+
 def quasi_diag_estimator(state, inputs, deer_jvp, key, num_samples=1):
     z_rad = jr.rademacher(key, (num_samples, state.shape[0])).astype(float)
     vmap_jvp = jax.vmap(deer_jvp, in_axes=(None, None, 0))
@@ -278,9 +285,10 @@ def jacobi_alg(
     full_trace=False,
     reset=True,
     tol=1e-4,
+    stopping="merit",
 ):
     """
-    Jacobi iteration.
+    Jacobi iteration. stopping: "merit" (default) or "rms", as in deer_alg.
     """
 
     @jax.jit
@@ -293,7 +301,7 @@ def jacobi_alg(
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, new_states, drivers)
+        mf_val = convergence_err(f, initial_state, new_states, drivers, stopping)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 
     def body_func_single(iter_inp):
@@ -322,7 +330,7 @@ def jacobi_alg(
             (
                 0,
                 states_guess,
-                merit_fxn(f, initial_state, states_guess, drivers),
+                convergence_err(f, initial_state, states_guess, drivers, stopping),
                 False,
                 None,
             ),
@@ -407,9 +415,10 @@ def picard_alg(f,
                num_iters,
                full_trace=False,
                reset=True,
-               tol=5e-4):
+               tol=5e-4,
+               stopping="merit"):
     """
-    Picard iteration.
+    Picard iteration. stopping: "merit" (default) or "rms", as in deer_alg.
     """
     @jax.jit
     def _step(carry, args):
@@ -426,7 +435,7 @@ def picard_alg(f,
         nan_mask = jnp.isnan(new_states)
         if reset:
             new_states = jnp.where(nan_mask, states_guess, new_states)
-        mf_val = merit_fxn(f, initial_state, new_states, drivers)
+        mf_val = convergence_err(f, initial_state, new_states, drivers, stopping)
         return (new_states, is_nan), (new_states, nan_mask, mf_val)
 
     def body_func_single(iter_inp):
@@ -455,7 +464,7 @@ def picard_alg(f,
             (
                 0,
                 states_guess,
-                merit_fxn(f, initial_state, states_guess, drivers),
+                convergence_err(f, initial_state, states_guess, drivers, stopping),
                 False,
                 None,
             ),

@@ -105,7 +105,7 @@ def main(cfg: DictConfig):
         _, _, newton_steps, *_ = deer_alg(
             deer_fxn, initial_state, states_guess, drivers,
             num_iters, k=cfg.deer_k,
-            full_trace=False, tol=tol,
+            full_trace=False, tol=tol, stopping="rms",
         )
         return newton_steps
 
@@ -113,21 +113,21 @@ def main(cfg: DictConfig):
         _, _, newton_steps, *_ = deer_alg(
             deer_fxn, initial_state, states_guess, drivers,
             num_iters, quasi=True, k=cfg.deer_k,
-            full_trace=False, tol=tol,
+            full_trace=False, tol=tol, stopping="rms",
         )
         return newton_steps
 
     def picard_eval(drivers):
         _, _, newton_steps, *_ = picard_alg(
             deer_fxn, initial_state, states_guess, drivers,
-            num_iters, full_trace=False, tol=tol,
+            num_iters, full_trace=False, tol=tol, stopping="rms",
         )
         return newton_steps
 
     def jacobi_eval(drivers):
         _, _, newton_steps, *_ = jacobi_alg(
             deer_fxn, initial_state, states_guess, drivers,
-            num_iters, full_trace=False, tol=tol,
+            num_iters, full_trace=False, tol=tol, stopping="rms",
         )
         return newton_steps
 

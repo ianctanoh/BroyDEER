@@ -820,8 +820,9 @@ def accelerated_broyden_deer_alg(
         gamma_den = jnp.sum(p_last * p_last,   axis=-1) + 1e-10
         gamma_new = jnp.where(iteration == 0, gamma, gamma_num / gamma_den)
 
-        # stopping criterion: ||r||_2 / sqrt(T*D)
-        mf_val = jnp.sqrt(jnp.mean(r_old ** 2))
+        # stopping criterion: ||r||_2 / sqrt(T*D) of the updated states
+        # (r_new, after any line-search damping), as in deer/picard/jacobi
+        mf_val = jnp.sqrt(jnp.mean(r_new ** 2))
         mf_val = jnp.where(jnp.isnan(mf_val), jnp.inf, mf_val)
 
         return (new_states, p_window_new, target_window_new, gamma_new,

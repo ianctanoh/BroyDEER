@@ -14,6 +14,7 @@ alg: "deer"
 
 # DEER / quasi-DEER specific
 deer_k: 0.2
+quasi_k: 0.2
 num_samples: 1
 
 # Broyden-DEER specific

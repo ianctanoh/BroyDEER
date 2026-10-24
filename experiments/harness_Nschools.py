@@ -1,19 +1,25 @@
 """
-harness.py
-Runs eight-schools experiments using hydra + wandb.
+harness_Nschools.py
+Runs N-schools Gibbs-sampler experiments using hydra + wandb.
 
 Options for alg are:
+- seq
 - deer
 - quasi
+- quasi_qmem
 - picard
 - jacobi
 - broyden
 - accelerated_broyden
 
+Stopping (all parallel solvers): ||r(x_{1:T})||_2 / sqrt(T*D) < tol, so the
+criterion scales with the chain length T and state dimension D = 2S + 2.
+
 Sweepable parameters:
   S              : number of schools (8, 16, 32, ...)
   T              : chain length / number of Gibbs samples
-  deer_k         : DEER / quasi-DEER damping (0 = no damping)
+  deer_k         : DEER (full Newton) damping (0 = no damping)
+  quasi_k        : quasi-DEER damping, also used by quasi_qmem (0 = no damping)
   bd_m           : Broyden-DEER rank
   bd_init        : Broyden-DEER init scheme (jac, identity, rescaled_identity, fresh_jac)
   bd_k           : Broyden-DEER damping (0 = no damping)
@@ -23,9 +29,9 @@ Sweepable parameters:
   acc_eps_gram   : Accelerated Broyden Gram regularization
 
 Example usage:
-  python harness.py alg=deer S=8 T=10000
-  python harness.py -m alg=deer,quasi,picard,jacobi S=8,16,32 T=10000
-  python harness.py alg=broyden bd_m=1,2,3,4 bd_init=jac,identity bd_k=0.0,0.5
+  python harness_Nschools.py alg=deer S=8 T=10000
+  python harness_Nschools.py -m alg=deer,quasi,picard,jacobi S=8,16,32 T=10000
+  python harness_Nschools.py alg=broyden bd_m=1,2,3,4 bd_init=jac,identity bd_k=0.0,0.5
 """
 
 import sys, os
@@ -41,12 +47,13 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 from lightning.pytorch.loggers import WandbLogger
 import time
+from functools import partial
 
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
-from dynamics.eight_schools import make_eight_schools
-from algs.deer import deer_alg, picard_alg, jacobi_alg
+from dynamics.eight_schools import make_eight_schools, make_gibbs_step
+from algs.deer import deer_alg, picard_alg, jacobi_alg, get_residual, stopping_criterion
 from algs.broyden_deer import broyden_deer_alg
 from algs.accelerated_broyden import accelerated_broyden_deer_alg
 
@@ -102,10 +109,10 @@ def main(cfg: DictConfig):
         key, drivers_key = jr.split(key)
         drivers = jr.split(drivers_key, T)
 
-        return deer_fxn_i, init_state, drivers, D_i
+        return deer_fxn_i, init_state, drivers, D_i, xs_i
 
     all_chain_data = [setup_chain(i) for i in range(total_chains)]
-    deer_fxn_0, _, _, D = all_chain_data[0]
+    deer_fxn_0, _, _, D, _ = all_chain_data[0]
 
     # lower bounds: sigmasqs and tausq must be positive
     lower_bounds = jnp.concatenate([
@@ -116,7 +123,7 @@ def main(cfg: DictConfig):
     ])
 
     # Use first chain for print info
-    _, init_state_0, drivers_0, _ = all_chain_data[0]
+    _, init_state_0, drivers_0, _, _ = all_chain_data[0]
     states_guess_0 = jnp.broadcast_to(init_state_0, (T, D))
 
     print(f"x64 enabled: {jax.config.jax_enable_x64}")
@@ -135,56 +142,56 @@ def main(cfg: DictConfig):
 
     def make_deer_eval(deer_fxn_i):
         def deer_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, *_ = deer_alg(
+            _, final_state, newton_steps, is_nan, *_ = deer_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
                 num_iters, k=cfg.deer_k,
-                full_trace=False, tol=tol,
+                full_trace=False, tol=tol, stopping="rms",
             )
-            return newton_steps
+            return newton_steps, final_state, is_nan
         return deer_eval
 
     def make_quasi_eval(deer_fxn_i):
         def quasi_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, *_ = deer_alg(
+            _, final_state, newton_steps, is_nan, *_ = deer_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
-                num_iters, quasi=True, k=cfg.deer_k,
-                full_trace=False, tol=tol,
+                num_iters, quasi=True, k=cfg.quasi_k,
+                full_trace=False, tol=tol, stopping="rms",
             )
-            return newton_steps
+            return newton_steps, final_state, is_nan
         return quasi_eval
 
     def make_quasi_qmem_eval(deer_fxn_i):
         def quasi_qmem_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, *_ = deer_alg(
+            _, final_state, newton_steps, is_nan, *_ = deer_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
-                num_iters, quasi=True, k=cfg.deer_k,
+                num_iters, quasi=True, k=cfg.quasi_k,
                 qmem_efficient=True, num_samples=cfg.num_samples,
-                full_trace=False, tol=tol,
+                full_trace=False, tol=tol, stopping="rms",
             )
-            return newton_steps
+            return newton_steps, final_state, is_nan
         return quasi_qmem_eval
 
     def make_picard_eval(deer_fxn_i):
         def picard_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, *_ = picard_alg(
+            _, final_state, newton_steps, is_nan, *_ = picard_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
-                num_iters, full_trace=False, tol=tol,
+                num_iters, full_trace=False, tol=tol, stopping="rms",
             )
-            return newton_steps
+            return newton_steps, final_state, is_nan
         return picard_eval
 
     def make_jacobi_eval(deer_fxn_i):
         def jacobi_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, *_ = jacobi_alg(
+            _, final_state, newton_steps, is_nan, *_ = jacobi_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
-                num_iters, full_trace=False, tol=tol,
+                num_iters, full_trace=False, tol=tol, stopping="rms",
             )
-            return newton_steps
+            return newton_steps, final_state, is_nan
         return jacobi_eval
 
     def make_broyden_eval(deer_fxn_i):
         def broyden_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, *_ = broyden_deer_alg(
+            _, final_state, newton_steps, is_nan, *_ = broyden_deer_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
                 num_iters, m=cfg.bd_m, init=cfg.bd_init,
                 k=cfg.bd_k, gamma=cfg.bd_gamma,
@@ -194,12 +201,12 @@ def main(cfg: DictConfig):
                 lower_bounds=lower_bounds,
                 line_search=True, ls_c=1e-3,
             )
-            return newton_steps
+            return newton_steps, final_state, is_nan
         return broyden_eval
 
     def make_accelerated_broyden_eval(deer_fxn_i):
         def accelerated_broyden_eval(initial_state, states_guess, drivers):
-            _, _, newton_steps, _, _, all_newtons, _ = accelerated_broyden_deer_alg(
+            _, final_state, newton_steps, is_nan, *_ = accelerated_broyden_deer_alg(
                 deer_fxn_i, initial_state, states_guess, drivers,
                 num_iters, m=cfg.acc_m, init=cfg.acc_init,
                 k=cfg.acc_k, gamma=cfg.acc_gamma,
@@ -207,7 +214,7 @@ def main(cfg: DictConfig):
                 full_trace=False, tol=tol,
                 lower_bounds=lower_bounds, line_search=True, ls_c=1e-2,
             )
-            return newton_steps, all_newtons
+            return newton_steps, final_state, is_nan
         return accelerated_broyden_eval
 
     make_eval_fns = {
@@ -225,16 +232,26 @@ def main(cfg: DictConfig):
 
     use_highest = alg in ("deer", "quasi", "quasi_qmem", "broyden", "accelerated_broyden")
 
+    # Compile once per run: the chain's observed data xs is a jit argument (not a
+    # baked-in constant), so all chains share one compiled solver.
+    def gibbs_step(xs):
+        return make_gibbs_step(S, cfg.N_s, xs, tausq_0=cfg.tausq_0, sigmasq_0=cfg.sigmasq_0)
+
+    make_eval = make_eval_fns[alg]
+    fxn = jax.jit(lambda xs, *args: make_eval(gibbs_step(xs))(*args))
+    final_rms_fxn = jax.jit(lambda xs, x0, states, drivers: stopping_criterion(
+        get_residual(gibbs_step(xs), x0, states, drivers)))
+
     # timed runs: loop over each chain individually
     all_steps_list = []
     all_times_list = []
+    final_rms_list = []   # per-chain RMS residual of the returned trajectory
+    is_nan_list = []      # per-chain flag: a NaN appeared during the solve
 
     for i in range(total_chains):
-        deer_fxn_i, init_state_i, drivers_i, _ = all_chain_data[i]
+        _, init_state_i, drivers_i, _, xs_i = all_chain_data[i]
         states_guess_i = jnp.broadcast_to(init_state_i, (T, D))
-
-        eval_fn_i = make_eval_fns[alg](deer_fxn_i)
-        fxn_i = jax.jit(eval_fn_i)
+        fxn_i = partial(fxn, xs_i)
 
         # warmup: trigger compilation before timing
         if use_highest:
@@ -265,11 +282,16 @@ def main(cfg: DictConfig):
 
         if alg == "seq":
             all_steps_list.append(T)
-        elif alg == "accelerated_broyden":
-            newton_steps_i, _ = result_i
-            all_steps_list.append(int(newton_steps_i))
+            final_rms_list.append(0.0)      # exact by construction
+            is_nan_list.append(False)
         else:
-            all_steps_list.append(int(result_i))
+            newton_steps_i, final_state_i, is_nan_i = result_i
+            all_steps_list.append(int(newton_steps_i))
+            # untimed: RMS residual ||r||_2 / sqrt(T*D) of the returned trajectory
+            with jax.default_matmul_precision("highest"):
+                final_rms_i = final_rms_fxn(xs_i, init_state_i, final_state_i, drivers_i)
+            final_rms_list.append(float(final_rms_i))
+            is_nan_list.append(bool(is_nan_i))
 
     all_steps = jnp.array(all_steps_list)
     all_times = jnp.array(all_times_list)
@@ -295,10 +317,15 @@ def main(cfg: DictConfig):
           f"time: {time_mean:.3e} ± {time_sd:.3e}s")
     print(f"  per-chain n_iters: {all_steps.tolist()}")
     print(f"  per-chain times: {[f'{t:.4e}' for t in all_times_list]}")
+    print(f"  per-chain final RMS residual: {[f'{r:.2e}' for r in final_rms_list]}")
+    print(f"  per-chain NaN: {is_nan_list}")
 
     results = {
         "per_chain_n_iters": all_steps.tolist(),
         "per_chain_times": all_times_list,
+        "per_chain_final_rms": final_rms_list,
+        "per_chain_is_nan": is_nan_list,
+        "n_nan": int(sum(is_nan_list)),
         "n_iters_mean": n_iters_mean,
         "n_iters_sd": n_iters_sd,
         "time_mean": time_mean,
