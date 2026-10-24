@@ -38,7 +38,9 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 import jax
-jax.config.update("jax_enable_x64", True)
+# float64 unless the sweep command sets JAX_ENABLE_X64=False (float32 ablation)
+X64 = os.environ.get("JAX_ENABLE_X64", "True").strip().lower() not in ("0", "false", "no")
+jax.config.update("jax_enable_x64", X64)
 # assert jax.devices()[0].platform == "gpu", f"No GPU found. Devices: {jax.devices()}"
 import jax.numpy as jnp
 import jax.random as jr
@@ -333,6 +335,7 @@ def main(cfg: DictConfig):
         "n_converged": n_converged,
         "frac_converged": n_converged / total_chains,
         "D": D,
+        "x64": X64,
     }
     logger.log_metrics(results)
     wandb.finish()
