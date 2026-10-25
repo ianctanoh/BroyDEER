@@ -1,0 +1,64 @@
+# N-schools ablation: damping k for accelerated_broyden (float32, tol=1e-3, line search on); otherwise identical to Nschools_float32_tol1e-3.yaml
+# damping: k=0 for deer, k=0.2 for quasi, broyden and accelerated_broyden
+command:
+  - ${env}
+  - JAX_PLATFORMS=cuda
+  - JAX_ENABLE_X64=False
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+method: grid
+program: harness_Nschools.py
+parameters:
+  alg:
+    values: ['accelerated_broyden']
+  S:
+    values: [10, 50, 100]
+  T:
+    values: [10000, 100000]
+  seed:
+    value: 13
+  N_s:
+    value: 20
+  batch_size:
+    value: 32
+  num_iters:
+    value: 1000
+  tol:
+    value: 1e-3
+  nwarmups:
+    value: 3
+  nreps:
+    value: 3
+  mode:
+    value: "online"
+  deer_k:
+    value: 0.0
+  quasi_k:
+    value: 0.2
+  bd_m:
+    value: 2
+  bd_init:
+    value: "identity"
+  bd_k:
+    value: 0.2
+  bd_gamma:
+    value: 0.
+  acc_m:
+    value: 2
+  acc_init:
+    value: "identity"
+  acc_k:
+    values: [0.0, 0.1, 0.2, 0.4]
+  acc_eps_gram:
+    value: 1e-6
+  acc_gamma:
+    value: 0.
+  acc_compress:
+    value: "low_rank_exact"
+  tausq_0:
+    value: 100.0
+  sigmasq_0:
+    value: 10.0
+project: broydeer
+name: Nschools_float32_tol1e-3_damping_accel

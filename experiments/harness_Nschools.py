@@ -23,10 +23,12 @@ Sweepable parameters:
   bd_m           : Broyden-DEER rank
   bd_init        : Broyden-DEER init scheme (jac, identity, rescaled_identity, fresh_jac)
   bd_k           : Broyden-DEER damping (0 = no damping)
+  bd_line_search : Broyden-DEER backtracking safeguard on/off (default on)
   acc_m          : Accelerated Broyden rank
   acc_init       : Accelerated Broyden init scheme (autodiff, identity, rescaled_identity)
   acc_k          : Accelerated Broyden damping (0 = no damping)
   acc_eps_gram   : Accelerated Broyden Gram regularization
+  acc_line_search: Accelerated Broyden backtracking safeguard on/off (default on)
 
 Example usage:
   python harness_Nschools.py alg=deer S=8 T=10000
@@ -201,7 +203,7 @@ def main(cfg: DictConfig):
                 compress=cfg.acc_compress,
                 full_trace=False, tol=tol,
                 lower_bounds=lower_bounds,
-                line_search=True, ls_c=1e-3,
+                line_search=cfg.bd_line_search, ls_c=1e-3,
             )
             return newton_steps, final_state, is_nan
         return broyden_eval
@@ -214,7 +216,7 @@ def main(cfg: DictConfig):
                 k=cfg.acc_k, gamma=cfg.acc_gamma,
                 eps_gram=cfg.acc_eps_gram, compress=cfg.acc_compress,
                 full_trace=False, tol=tol,
-                lower_bounds=lower_bounds, line_search=True, ls_c=1e-2,
+                lower_bounds=lower_bounds, line_search=cfg.acc_line_search, ls_c=1e-2,
             )
             return newton_steps, final_state, is_nan
         return accelerated_broyden_eval
