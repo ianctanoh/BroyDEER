@@ -29,6 +29,7 @@ Sweepable parameters:
   acc_k          : Accelerated Broyden damping (0 = no damping)
   acc_eps_gram   : Accelerated Broyden Gram regularization
   acc_line_search: Accelerated Broyden backtracking safeguard on/off (default on)
+  acc_ls_c       : Accelerated Broyden safeguard step fraction for bad steps (default 0.01)
 
 Example usage:
   python harness_Nschools.py alg=deer S=8 T=10000
@@ -216,7 +217,7 @@ def main(cfg: DictConfig):
                 k=cfg.acc_k, gamma=cfg.acc_gamma,
                 eps_gram=cfg.acc_eps_gram, compress=cfg.acc_compress,
                 full_trace=False, tol=tol,
-                lower_bounds=lower_bounds, line_search=cfg.acc_line_search, ls_c=1e-2,
+                lower_bounds=lower_bounds, line_search=cfg.acc_line_search, ls_c=cfg.acc_ls_c,
             )
             return newton_steps, final_state, is_nan
         return accelerated_broyden_eval

@@ -32,6 +32,7 @@ acc_eps_gram: 1e-6
 acc_gamma: 0.
 acc_compress: "low_rank_exact"
 acc_line_search: true
+acc_ls_c: 0.01
 
 hydra:
   run:
