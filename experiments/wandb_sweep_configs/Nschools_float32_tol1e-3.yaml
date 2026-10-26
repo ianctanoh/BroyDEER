@@ -44,6 +44,8 @@ parameters:
     value: 0.2
   bd_gamma:
     value: 0.
+  bd_line_search:
+    value: false
   acc_m:
     value: 2
   acc_init:
@@ -56,6 +58,8 @@ parameters:
     value: 0.
   acc_compress:
     value: "low_rank_exact"
+  acc_ls_c:
+    value: 0.001
   tausq_0:
     value: 100.0
   sigmasq_0:

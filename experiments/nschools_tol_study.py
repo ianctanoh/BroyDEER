@@ -17,8 +17,10 @@ the metrics, not float32 rounding error.
 
 Chain setup and solver settings are those of harness_Nschools.py with
 wandb_sweep_configs/Nschools_float32_tol1e-3.yaml (deer_k=0, quasi_k=0.2,
-bd_k=acc_k=0.2, m=2, identity init, gamma=0, low_rank_exact, line search,
-lower bounds, num_iters=1000), run in float32.
+bd_k=acc_k=0.2, m=2, identity init, gamma=0, low_rank_exact,
+lower bounds, num_iters=1000; Broyden without line search, Accelerated Broyden
+with line search and safeguard step acc_ls_c=0.001),
+run in float32.
 
 Usage:
     JAX_PLATFORMS=cuda python nschools_tol_study.py [--S 10 50 100] [--T 10000 100000]
@@ -112,13 +114,13 @@ def make_solver(alg, S, tol, lower_bounds):
             out = broyden_deer_alg(f, x0, guess, drivers, NUM_ITERS, m=M, init=INIT,
                                    k=BD_K, gamma=GAMMA, sequential_solve=False,
                                    compress=COMPRESS, full_trace=False, tol=tol,
-                                   lower_bounds=lower_bounds, line_search=True, ls_c=1e-3)
+                                   lower_bounds=lower_bounds, line_search=False)
         elif alg == "accelerated_broyden":
             out = accelerated_broyden_deer_alg(f, x0, guess, drivers, NUM_ITERS, m=M, init=INIT,
                                                k=ACC_K, gamma=GAMMA, eps_gram=EPS_GRAM,
                                                compress=COMPRESS, full_trace=False, tol=tol,
                                                lower_bounds=lower_bounds, line_search=True,
-                                               ls_c=1e-2)
+                                               ls_c=1e-3)
         else:
             raise ValueError(alg)
         _, traj, iters, is_nan, *_ = out

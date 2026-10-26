@@ -23,13 +23,13 @@ Sweepable parameters:
   bd_m           : Broyden-DEER rank
   bd_init        : Broyden-DEER init scheme (jac, identity, rescaled_identity, fresh_jac)
   bd_k           : Broyden-DEER damping (0 = no damping)
-  bd_line_search : Broyden-DEER backtracking safeguard on/off (default on)
+  bd_line_search : Broyden-DEER backtracking safeguard on/off (default off)
   acc_m          : Accelerated Broyden rank
   acc_init       : Accelerated Broyden init scheme (autodiff, identity, rescaled_identity)
   acc_k          : Accelerated Broyden damping (0 = no damping)
   acc_eps_gram   : Accelerated Broyden Gram regularization
   acc_line_search: Accelerated Broyden backtracking safeguard on/off (default on)
-  acc_ls_c       : Accelerated Broyden safeguard step fraction for bad steps (default 0.01)
+  acc_ls_c       : Accelerated Broyden safeguard step fraction for bad steps (default 0.001)
 
 Example usage:
   python harness_Nschools.py alg=deer S=8 T=10000

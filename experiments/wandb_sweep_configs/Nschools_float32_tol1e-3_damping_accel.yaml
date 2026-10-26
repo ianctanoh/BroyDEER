@@ -1,4 +1,4 @@
-# N-schools ablation: damping k for accelerated_broyden (float32, tol=1e-3, line search on); otherwise identical to Nschools_float32_tol1e-3.yaml
+# N-schools ablation: damping acc_k for Accelerated Broyden (float32, tol=1e-3, line search on, acc_ls_c=0.001); otherwise identical to Nschools_float32_tol1e-3.yaml
 # damping: k=0 for deer, k=0.2 for quasi, broyden and accelerated_broyden
 command:
   - ${env}
@@ -15,7 +15,7 @@ parameters:
   S:
     values: [10, 50, 100]
   T:
-    values: [10000, 100000]
+    values: [1000, 10000, 50000, 100000]
   seed:
     value: 13
   N_s:
@@ -49,13 +49,15 @@ parameters:
   acc_init:
     value: "identity"
   acc_k:
-    values: [0.0, 0.1, 0.2, 0.4]
+    values: [0.0, 0.1, 0.2, 0.3, 0.4]
   acc_eps_gram:
     value: 1e-6
   acc_gamma:
     value: 0.
   acc_compress:
     value: "low_rank_exact"
+  acc_ls_c:
+    value: 0.001
   tausq_0:
     value: 100.0
   sigmasq_0:
