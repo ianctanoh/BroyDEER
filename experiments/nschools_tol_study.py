@@ -17,7 +17,7 @@ the metrics, not float32 rounding error.
 
 Chain setup and solver settings are those of harness_Nschools.py with
 wandb_sweep_configs/Nschools_float32_tol1e-3.yaml (deer_k=0, quasi_k=0.2,
-bd_k=acc_k=0.2, m=2, identity init, gamma=0, low_rank_exact,
+bd_k=0.3, acc_k=0.2, m=2, identity init, gamma=0, low_rank_exact,
 lower bounds, num_iters=1000; Broyden without line search, Accelerated Broyden
 with line search and safeguard step acc_ls_c=0.001),
 run in float32.
@@ -66,7 +66,7 @@ args = parser.parse_args()
 # ── settings of harness_Nschools.py / Nschools_float32_tol1e-3.yaml ──
 SEED, N_S, TAUSQ_0, SIGMASQ_0 = 13, 20, 100.0, 10.0
 NUM_ITERS = 1000
-DEER_K, QUASI_K, BD_K, ACC_K = 0.0, 0.2, 0.2, 0.2
+DEER_K, QUASI_K, BD_K, ACC_K = 0.0, 0.2, 0.3, 0.2
 M, INIT, GAMMA, COMPRESS, EPS_GRAM = 2, "identity", 0.0, "low_rank_exact", 1e-6
 BURNIN_FRAC = 0.1
 

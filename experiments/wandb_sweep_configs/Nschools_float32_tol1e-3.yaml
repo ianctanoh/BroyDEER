@@ -41,7 +41,7 @@ parameters:
   bd_init:
     value: "identity"
   bd_k:
-    value: 0.2
+    value: 0.3
   bd_gamma:
     value: 0.
   bd_line_search:

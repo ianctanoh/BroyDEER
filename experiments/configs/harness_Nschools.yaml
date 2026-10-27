@@ -20,7 +20,7 @@ num_samples: 1
 # Broyden-DEER specific
 bd_m: 2
 bd_init: "identity"
-bd_k: 0.2
+bd_k: 0.3
 bd_gamma: 0.
 bd_line_search: false
 
