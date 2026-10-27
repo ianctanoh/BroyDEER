@@ -51,7 +51,7 @@ parameters:
   acc_init:
     value: "identity"
   acc_k:
-    value: 0.2
+    value: 0.1
   acc_eps_gram:
     value: 1e-6
   acc_gamma:
