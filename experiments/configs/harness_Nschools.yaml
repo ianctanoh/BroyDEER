@@ -13,7 +13,7 @@ mode: "online"
 alg: "deer"
 
 # DEER / quasi-DEER specific
-deer_k: 0.2
+deer_k: 0.0
 quasi_k: 0.0
 num_samples: 1
 
