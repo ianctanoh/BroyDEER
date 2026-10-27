@@ -122,7 +122,7 @@ def run_broyden_trace(x0, guess, drivers):
 def run_accel_trace(x0, guess, drivers):
     res = accelerated_broyden_ddim_alg(dit_dynamics, x0, guess, drivers, num_iters,
                                        m=2, init="identity", gamma=1.0, k=0.0,
-                                       full_trace=True, sequential_solve=True)
+                                       full_trace=True, sequential_solve=False, compress="rand")
     return res[0]  # all_states: (num_iters+1, T, D)
 
 methods = [

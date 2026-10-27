@@ -9,6 +9,8 @@ Methods (all DDIM-specific solvers, same convergence check):
   2. QuasiDEER:    Hutchinson diagonal, 1 sample
   3. Broyden:      m=2, gamma=1.0, identity
   4. AccBroyden:   m=2, gamma=1.0, identity
+  (Broyden and AccBroyden both solve the block-bidiagonal system with the
+   parallel associative scan and randomized rank compression, compress="rand".)
   5. TAA:          k=10, m=2, Gram system accumulated/solved in float64 (as
                    ParaTAA); everything else float32. Only TAA is traced and
                    run under jax.experimental.enable_x64.
@@ -154,7 +156,7 @@ def run_accbroy(dynamics, x0, guess, drivers):
     res = accelerated_broyden_ddim_alg(dynamics, x0, guess, drivers, max_n,
                                        m=2, init="identity", gamma=1.0, k=0.0,
                                        full_trace=False, tol=tol,
-                                       sequential_solve=True)
+                                       sequential_solve=False, compress="rand")
     return res[1], res[2]
 
 @jax.jit
