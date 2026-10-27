@@ -138,7 +138,8 @@ def run_traces(pkl_path):
     def run_accbroy(dynamics, x0, guess, drivers):
         return trace(accelerated_broyden_ddim_alg(dynamics, x0, guess, drivers, max_n,
                                                   m=2, init="identity", gamma=1.0, k=0.0,
-                                                  full_trace=True, sequential_solve=True))
+                                                  full_trace=True, sequential_solve=False,
+                                                  compress="rand"))
 
     @jax.jit
     def _run_taa(dynamics, x0, guess, drivers):
