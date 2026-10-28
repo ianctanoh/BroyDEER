@@ -81,7 +81,8 @@ def broyden_ddim_alg(
         gamma          : scaling for identity init (default 1.0)
         sequential_solve : if True, use sequential forward substitution
         compress       : compression for parallel solve: "rand" (GPU-friendly,
-                         default) or "qr_svd" (LAPACK, may OOM on large D)
+                         default), "rand_rr" (rand with rank-revealing
+                         Gram-Schmidt) or "qr_svd" (LAPACK, may OOM on large D)
         k              : damping parameter for rank-1 corrections (default 0.0)
         full_trace     : if True, return all intermediate states via scan
         Ts             : optional time indices for multi-checkpoint convergence

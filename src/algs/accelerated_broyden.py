@@ -130,11 +130,21 @@ def lrmat_compose_k1(d_a, U_a, V_a, d_b, U_b, V_b):
     return d_new, U_new, V_new
 
 
-def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, m, key):
+# Relative tolerance of the rank-revealing Gram-Schmidt in compress="rand_rr".
+RR_TOL = 1e-4
+
+
+def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, m, key, rank_revealing=False):
     """
     GPU-friendly rank-m composition via randomized range finder.
     No QR on (D,2m), no SVD. Just sketch + GS on m columns + matmuls.
     Uses ℓ = m (no oversampling).
+
+    rank_revealing: a sketch column whose orthogonalized remainder is below
+    RR_TOL times its original norm is set to zero instead of normalized. When
+    the composed low-rank part has rank < m, the plain version turns rounding
+    noise into a unit column that is not orthogonal to the others, so Q Q^T is
+    no longer a projection; in float32 this slows Accelerated Broyden down.
     """
     D = d_a.shape[0]
 
@@ -154,8 +164,11 @@ def lrmat_compose_rand(d_a, U_a, V_a, d_b, U_b, V_b, m, key):
         v = H[:, i]
         for j in range(i):
             v = v - jnp.dot(qs[j], v) * qs[j]
-        v = v / jnp.maximum(jnp.linalg.norm(v), 1e-30)
-        qs.append(v)
+        nv = jnp.linalg.norm(v)
+        q = v / jnp.maximum(nv, 1e-30)
+        if rank_revealing:
+            q = jnp.where(nv > RR_TOL * jnp.linalg.norm(H[:, i]), q, jnp.zeros_like(q))
+        qs.append(q)
     Q = jnp.stack(qs, axis=1)                  # (D, m)
 
     # Factored form: A ≈ Q (Q^T A) = Q (Q^T Uc) Vc^T = U_new V_new^T
@@ -239,6 +252,7 @@ def make_combine(m, compress="rand"):
     """Return a combine function for lax.associative_scan with rank-m blocks.
 
     compress: "rand"      — randomized range finder (no SVD, fastest on GPU)
+              "rand_rr"   — rand with rank-revealing Gram-Schmidt (see lrmat_compose_rand)
               "low_rank_exact" — like rand, but uses exact composition when both diags are zero
               "gs_svd"    — manual Gram-Schmidt + LAPACK SVD on tiny core
               "qr_svd"    — original LAPACK QR + SVD (reference)
@@ -246,15 +260,16 @@ def make_combine(m, compress="rand"):
     When compress starts with "rand" and m >= 2, the scan state carries a PRNG
     key per element so each composition draws a fresh Gaussian sketch.
     """
-    if m >= 2 and compress == "rand":
+    if m >= 2 and compress in ("rand", "rand_rr"):
         # --- rand path: 6-element state with PRNG key ---
+        rank_revealing = compress == "rand_rr"
         def combine(elem_a, elem_b):
             alpha_a, d_a, U_a, V_a, dvec_a, key_a = elem_a
             alpha_b, d_b, U_b, V_b, dvec_b, key_b = elem_b
             alpha_new            = alpha_a * alpha_b
             subkey, new_key      = jr.split(key_a)
             d_new, U_new, V_new  = lrmat_compose_rand(
-                d_a, U_a, V_a, d_b, U_b, V_b, m, subkey)
+                d_a, U_a, V_a, d_b, U_b, V_b, m, subkey, rank_revealing=rank_revealing)
             dvec_new             = -alpha_b * lrmat_apply(d_b, U_b, V_b, dvec_a) + dvec_b
             return alpha_new, d_new, U_new, V_new, dvec_new, new_key
     else:
@@ -294,7 +309,7 @@ def solve_rankk_bidiag(d_blocks, U_blocks, V_blocks, r, m, compress="rand", iter
     dvec   = -r
 
     scan_fn = get_scan_fn(scan_tree)
-    if m >= 2 and compress == "rand":
+    if m >= 2 and compress in ("rand", "rand_rr"):
         keys = jr.split(jr.fold_in(jr.PRNGKey(42), iteration), T)
         _, _, _, _, delta_s, _ = scan_fn(
             vmap(make_combine(m, compress=compress)),

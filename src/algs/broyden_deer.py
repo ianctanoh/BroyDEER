@@ -77,16 +77,19 @@ def make_combine(m, compress="qr_svd"):
     compress: "qr_svd"         — LAPACK QR + SVD on (D, 2m) (exact, reference)
               "rand"           — randomized range finder (no SVD, GPU-friendly);
                                  requires m >= 2 and a PRNG key carried per element.
+              "rand_rr"        — rand with rank-revealing Gram-Schmidt
+                                 (see accelerated_broyden.lrmat_compose_rand)
               "low_rank_exact" — exact rank-m composition when d_b = 0 (no QR/SVD)
     """
-    if m >= 2 and compress == "rand":
+    if m >= 2 and compress in ("rand", "rand_rr"):
+        rank_revealing = compress == "rand_rr"
         def combine(elem_a, elem_b):
             alpha_a, d_a, U_a, V_a, dvec_a, key_a = elem_a
             alpha_b, d_b, U_b, V_b, dvec_b, key_b = elem_b
             alpha_new           = alpha_a * alpha_b
             subkey, new_key     = jr.split(key_a)
             d_new, U_new, V_new = lrmat_compose_rand(
-                d_a, U_a, V_a, d_b, U_b, V_b, m, subkey)
+                d_a, U_a, V_a, d_b, U_b, V_b, m, subkey, rank_revealing=rank_revealing)
             dvec_new            = -alpha_b * lrmat_apply(d_b, U_b, V_b, dvec_a) + dvec_b
             return alpha_new, d_new, U_new, V_new, dvec_new, new_key
     else:
@@ -139,7 +142,7 @@ def broyden_solve(d_blocks, U_blocks, V_blocks, r, compress="qr_svd", iteration=
     Solve  B @ delta_s = -r  where B is block-bidiagonal with subdiagonal blocks
         b_t = diag(d_blocks[t]) + U_blocks[t] V_blocks[t]^T.
 
-    compress: "qr_svd" (default) or "rand". The "rand" path uses a randomized
+    compress: "qr_svd" (default), "rand" or "rand_rr". The "rand" path uses a randomized
     range finder (requires m >= 2) and draws fresh Gaussian sketches per
     outer iteration via fold_in(PRNGKey(42), iteration).
     scan_tree: "blelloch" (default, matches jax.lax.associative_scan) or
@@ -156,7 +159,7 @@ def broyden_solve(d_blocks, U_blocks, V_blocks, r, compress="qr_svd", iteration=
 
     combine = make_combine(m, compress=compress)
     scan_fn = get_scan_fn(scan_tree)
-    if m >= 2 and compress == "rand":
+    if m >= 2 and compress in ("rand", "rand_rr"):
         keys = jr.split(jr.fold_in(jr.PRNGKey(42), iteration), T)
         _, _, _, _, delta_s, _ = scan_fn(
             vmap(combine),
@@ -425,6 +428,7 @@ def broyden_deer_alg(
         compress       : "qr_svd" (default) or "rand". "rand" uses a randomized
                          range finder in the associative_scan composition
                          (requires m >= 2), matching accelerated_broyden.
+                         "rand_rr": rand with rank-revealing Gram-Schmidt.
         line_search    : if True, damp the Newton step with ls_c when the update
                          is non-finite or raises the merit more than 10x
         ls_c           : damping factor used when the line-search guard triggers

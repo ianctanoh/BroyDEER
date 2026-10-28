@@ -61,7 +61,8 @@ def accelerated_broyden_ddim_alg(
         init           : "identity" or "rescaled_identity"
         gamma          : scaling for identity init
         sequential_solve : if True, use sequential forward substitution
-        compress       : "rand" (GPU-friendly) or "qr_svd" for parallel solve
+        compress       : "rand" (GPU-friendly), "rand_rr" (rand with rank-revealing
+                         Gram-Schmidt) or "qr_svd" for parallel solve
         k              : damping (default 0.0)
         eps_gram       : regularization for Gram matrix (default 1e-10)
         full_trace     : if True, return all states via scan
