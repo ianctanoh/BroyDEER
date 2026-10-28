@@ -68,11 +68,13 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 
 | Paper | Experiment | Command(s) |
 | --- | --- | --- |
-| TODO | N-schools: iterations and wall-clock vs. solver | `wandb sweep wandb_sweep_configs/Nschools.yaml`, then `python plot_Nschools.py --pickle saved_files/<pickle>.pkl` |
-| TODO | N-schools: damping k=0.2 | `wandb sweep wandb_sweep_configs/Nschools_k02.yaml` |
-| TODO | N-schools: rescaled | `wandb sweep wandb_sweep_configs/Nschools_rescaled.yaml` |
-| TODO | N-schools: Broyden memory (S=10/50/100) | `wandb sweep wandb_sweep_configs/Nschools_qmem_S{10,50,100}.yaml` |
-| TODO | N-schools: S=100, T=100k, sequential vs. Accelerated Broyden | `wandb sweep wandb_sweep_configs/Nschools_S100_T100k.yaml` |
+| TODO | N-schools: iterations and wall-clock vs. solver (sequential, DEER, quasi-DEER, Parallel Broyden, Accelerated Parallel Broyden; S in {10,50,100,200}, T in {1k,10k,50k,100k}; float32, tol=1e-3) | `wandb sweep wandb_sweep_configs/Nschools_final_float32.yaml` |
+| TODO | N-schools: damping search for each solver | `wandb sweep wandb_sweep_configs/Nschools_float32_tol1e-3_damping_{broyden,accel,deer,quasi}.yaml` |
+| TODO | N-schools: line-search ablation (Broyden solvers without the safeguard; Accelerated Broyden safeguard step) | `wandb sweep wandb_sweep_configs/Nschools_float32_tol1e-3_no_linesearch.yaml`, `wandb sweep wandb_sweep_configs/Nschools_float32_tol1e-3_accel_ls_c.yaml` |
+| TODO | N-schools: float32 vs. float64 at tol=1e-3 | `wandb sweep wandb_sweep_configs/Nschools_float32_tol1e-3.yaml`, `wandb sweep wandb_sweep_configs/Nschools_tol1e-3.yaml` (ran with damping 0.2 for quasi-DEER and both Broyden solvers; `Nschools_float32_tol1e-3.yaml` now holds the final defaults) |
+| TODO | N-schools: quasi-DEER with a Hutchinson diagonal, number of Rademacher probes | `wandb sweep wandb_sweep_configs/Nschools_qmem_S{10,50,100}.yaml` |
+| TODO | N-schools: tolerance study (accuracy vs. sequential Gibbs sampling, float32) | `python nschools_tol_study.py` |
+| TODO | N-schools: trace plots (sequential vs. parallel solvers) | `python nschools_tol_study.py --S 100 --T 100000 --tols 1e-3 --save_chain 7 --traj_dir <DIR>`, then `python plot_nschools_traces.py --traj_dir <DIR>` |
 | TODO | Low-rank RNN: runtime vs. (N, T), regime A (dt=3) | `wandb sweep sweep_rnn_A.yaml` (also `sweep_rnn_A_full.yaml`, `_N1000`, `_T500k`, `_rescaled`) |
 | TODO | Low-rank RNN: regime B (dt=7) | `wandb sweep sweep_rnn_B.yaml` |
 | TODO | Low-rank RNN: Broyden damping / rescaling | `wandb sweep sweep_rnn_A_broyden_damping.yaml`, `sweep_rnn_A_broyden_rescaled.yaml` |
