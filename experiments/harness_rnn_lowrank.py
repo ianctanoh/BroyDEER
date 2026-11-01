@@ -22,8 +22,12 @@ at most 1000 iterations):
   quasi    : quasi-DEER (exact diagonal of the Jacobian), damping k_quasi
   jacobi   : Jacobi / fixed-point iteration (no Jacobian; = quasi-DEER with k=1)
   broyden  : Parallel Broyden,            m=3, diagonal init gamma = a (exact diagonal),
-             compress="rand_rr", line search ls_c=1e-3,   damping k_broyden
-  accel    : Accelerated Parallel Broyden, same + eps_gram=1e-6, damping k_accel
+             compress="rand_rr", no line search (--ls_broyden 1: on), damping k_broyden
+  accel    : Accelerated Parallel Broyden, same + eps_gram=1e-6, line search with c = ls_c = 1e-3
+             (--ls_c; --ls_accel 0: off), damping k_accel
+Line search: off for Broyden (same failures and median iterations with or without it; mean
+iterations ~4% lower with it), on for Accelerated Broyden (without it ~47% of chains fail;
+c tested in {1e-4, 1e-3, 1e-2, 0.1, 0.5}: 1e-4 equivalent to 1e-3, >= 1e-2 much worse).
 Damping defaults depend on dt (table DAMPING below): tuned per setting by minimizing the median
 number of iterations over all chains (non-converged chains counted at the cap), summed over
 std D in {50,100,200} and mlp (L=8) D in {100,200}, T in {1e4,1e5} (quasi-DEER: T=1e4), 32 chains.
@@ -59,7 +63,7 @@ from algs.accelerated_broyden import accelerated_broyden_deer_alg
 # Damping k per time step dt (tau = 10), tuned as described in the module docstring.
 DAMPING = {
     3.0: dict(newton=0.0, quasi=0.8, broyden=0.4, accel=0.1),
-    0.5: dict(newton=0.0, quasi=0.4, broyden=0.2, accel=0.2),
+    0.5: dict(newton=0.0, quasi=0.1, broyden=0.2, accel=0.2),
 }
 
 parser = argparse.ArgumentParser()
@@ -75,13 +79,17 @@ parser.add_argument("--k_newton", type=float, default=None, help="override DAMPI
 parser.add_argument("--k_quasi", type=float, default=None)
 parser.add_argument("--k_broyden", type=float, default=None)
 parser.add_argument("--k_accel", type=float, default=None)
+parser.add_argument("--ls_broyden", type=int, default=0, help="line search for Parallel Broyden (1 on, 0 off; default off)")
+parser.add_argument("--ls_accel", type=int, default=1, help="line search for Accelerated Broyden (1 on, 0 off)")
+parser.add_argument("--ls_c", type=float, default=1e-3, help="line-search sufficient-decrease constant c")
 parser.add_argument("--no_timing", action="store_true", help="one untimed solve per chain")
 parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "saved_files",
                                                   "rnn_lowrank_results.pkl"))
 args = parser.parse_args()
 
 SEED, R, TAU, G, SIG, BETA = 42, 3, 10.0, 2.0, 0.1, 0.5
-TOL, NUM_ITERS, M_HIST, EPS_GRAM, LS_C = 1e-4, 1000, 3, 1e-6, 1e-3
+TOL, NUM_ITERS, M_HIST, EPS_GRAM = 1e-4, 1000, 3, 1e-6
+LS_C = args.ls_c                                              # line search c (default 1e-3)
 f32 = jnp.float32
 
 
@@ -162,13 +170,14 @@ def make_solver(method, dt, k):
         elif method == "broyden":
             out = broyden_deer_alg(f, x0, guess, d, NUM_ITERS, m=M_HIST, init="identity",
                                    k=k["broyden"], gamma=gamma, compress="rand_rr",
-                                   full_trace=False, tol=TOL, line_search=True, ls_c=LS_C)
+                                   full_trace=False, tol=TOL, line_search=bool(args.ls_broyden),
+                                   ls_c=LS_C)
         elif method == "accel":
             out = accelerated_broyden_deer_alg(f, x0, guess, d, NUM_ITERS, m=M_HIST,
                                                init="identity", k=k["accel"], gamma=gamma,
                                                eps_gram=EPS_GRAM, compress="rand_rr",
                                                qmem_efficient=True, full_trace=False, tol=TOL,
-                                               line_search=True, ls_c=LS_C)
+                                               line_search=bool(args.ls_accel), ls_c=LS_C)
         else:
             raise ValueError(method)
         return out[2], out[1][-1]                       # iterations, last state
@@ -208,7 +217,10 @@ for cfg in args.configs:
                         err = str(e).split("\n")[0][:200]
                         break
                 row = dict(model=model, D=D, L=L, dt=dt, T=T, method=method,
-                           k=k.get(method), seeds=[c[0] for c in chains], seeds_tried=tried)
+                           k=k.get(method), seeds=[c[0] for c in chains], seeds_tried=tried,
+                           line_search={"broyden": bool(args.ls_broyden),
+                                        "accel": bool(args.ls_accel)}.get(method),
+                           ls_c=LS_C if method in ("broyden", "accel") else None)
                 if err:
                     row["error"] = err
                     print(f"  {method:8s} ERROR: {err[:100]}", flush=True)
