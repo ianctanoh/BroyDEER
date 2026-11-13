@@ -17,7 +17,7 @@ discrete-time dynamical systems, written in JAX. The package (`brodeer`) contain
 | DDIM-specialized variants (Picard, DEER, Broyden, Accelerated Broyden) | `src/algs/*_ddim.py` |
 
 Dynamical systems live in `src/dynamics/` (N-schools Gibbs sampler, low-rank RNN,
-discretized mean-field RNN, GRU, S_N word problem, DDIM diffusion), and the
+discretized mean-field RNN, DDIM diffusion), and the
 JAX port of DiT-XL/2 is in `src/models/dit.py`.
 
 ## Installation

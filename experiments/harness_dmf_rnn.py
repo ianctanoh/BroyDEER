@@ -2,7 +2,7 @@
 harness_dmf_rnn.py
 Runs discretized mean-field RNN experiments using hydra + wandb.
 
-Same structure as harness_gru.py: the update function (deer_fxn) is
+The update function (deer_fxn) is
 determined solely by the DMF-RNN weights W, which are drawn once from
 `seed`/`g` and shared across all chains -- so we jit the eval function once
 and loop over `batch_size` chains re-using that same compiled function,
@@ -185,7 +185,7 @@ def main(cfg: DictConfig):
             jax.block_until_ready(fxn(init_0, guess_0, drivers_0))
 
     # timed runs: loop over each chain individually, reusing the same
-    # compiled fxn -- gives per-chain n_iters/time like harness_gru.py
+    # compiled fxn -- gives per-chain n_iters/time
     all_steps_list = []
     all_times_list = []
     all_final_rms_list = []
