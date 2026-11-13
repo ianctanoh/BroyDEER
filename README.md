@@ -22,7 +22,7 @@ JAX port of DiT-XL/2 is in `src/models/dit.py`.
 ## Installation
 
 Requires Python >= 3.10 and a CUDA 12 GPU for the timing experiments. The paper's runtimes were measured on a
-single NVIDIA H100 (80 GB); the largest Newton runs (T=1e5) need most of its memory. Iteration counts are
+single NVIDIA H100 (80 GB). The largest Newton runs (T=1e5) need most of its memory. Iteration counts are
 reproducible across GPUs (fixed seeds), runtimes are not.
 
 ```bash
@@ -33,9 +33,9 @@ pip install -e ".[dit]"     # additionally: PyTorch, diffusers, lpips for DiT ex
 ```
 
 The paper's experiments run in float32. The RNN and N-schools experiments use highest-precision
-matrix multiplications (no TF32), which the harnesses set themselves (`jax_default_matmul_precision="highest"`);
-the DiT experiments use JAX's default precision (TF32 on recent GPUs). Do not set `JAX_ENABLE_X64=True` for them;
-the N-schools commands below set `JAX_ENABLE_X64=False` explicitly, since `harness_Nschools.py` defaults to float64
+matrix multiplications (no TF32), which the harnesses set themselves (`jax_default_matmul_precision="highest"`).
+The DiT experiments use JAX's default precision (TF32 on recent GPUs). Do not set `JAX_ENABLE_X64=True` for them.
+The N-schools commands below set `JAX_ENABLE_X64=False` explicitly, since `harness_Nschools.py` defaults to float64
 otherwise.
 
 ### DiT weights
@@ -55,7 +55,7 @@ The VAE decoder (`stabilityai/sd-vae-ft-mse`) is downloaded automatically by
 
 All commands are run from `experiments/`. Harnesses use
 [Hydra](https://hydra.cc) for configuration (`experiments/configs/`) and log to
-[Weights & Biases](https://wandb.ai). Grid sweeps are wandb sweep files; launch
+[Weights & Biases](https://wandb.ai). Grid sweeps are wandb sweep files. Launch
 them with
 
 ```bash
@@ -64,7 +64,7 @@ wandb agent <entity>/<project>/<sweep_id>
 ```
 
 (this needs a wandb account and `wandb login`). The Hydra harnesses also run without an account with
-`mode=offline`; the DMF and N-schools converters below read the local `wandb/` run folders, so offline runs
+`mode=offline`. The DMF and N-schools converters below read the local `wandb/` run folders, so offline runs
 work with them. Export finished sweeps to pandas pickles with
 
 ```bash
@@ -74,7 +74,7 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 
 | Paper | Experiment | Command(s) |
 | --- | --- | --- |
-| Fig. 1 (left, middle), Tables 8, 11 | Low-rank RNNs (standard and MLP, D in {100,200}, dt in {0.5,3}, T in {1e3,1e4,1e5}, 32 chains): sequential, Newton, diagonal quasi-Newton, Parallel Broyden, Accelerated Parallel Broyden | `python harness_rnn_lowrank.py --out <dir>/<name>.pkl` (default arguments = the full grid; one job per setting: `--configs <model:D:L> --dt <dt>`), then `python rnn_lowrank_to_dataframe.py <dir> saved_files/<name>.pkl` |
+| Fig. 1 (left, middle), Tables 8, 11 | Low-rank RNNs (standard and MLP, D in {100,200}, dt in {0.5,3}, T in {1e3,1e4,1e5}, 32 chains): sequential, Newton, diagonal quasi-Newton, Parallel Broyden, Accelerated Parallel Broyden | `python harness_rnn_lowrank.py --out <dir>/<name>.pkl` (default arguments = the full grid, or one job per setting with `--configs <model:D:L> --dt <dt>`), then `python rnn_lowrank_to_dataframe.py <dir> saved_files/<name>.pkl` |
 | Fig. 1 (right) | Discretized mean-field RNN (D=128, g=1.7, T=1e4, 32 chains): Parallel Broyden m in {1,5,...,80}, Accelerated Parallel Broyden m in {1,5,10,15,20} | `bash run_sweep_dmf_rnn.sh` (commands inside), then `python dmf_wandb_to_dataframe.py saved_files/<name>.pkl --since <start> --T 10000 --batch_size 32` (latest run per setting) |
 | Fig. 2 | N-schools Gibbs sampler: S in {10,50,100,200}, T in {1e3,1e4,5e4,1e5} | `wandb sweep wandb_sweep_configs/Nschools_final_float32.yaml` |
 | App. G (damping) | N-schools: damping search for each solver | `wandb sweep wandb_sweep_configs/Nschools_float32_tol1e-3_damping_{broyden,accel,deer,quasi}.yaml` |
