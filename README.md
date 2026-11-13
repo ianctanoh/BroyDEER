@@ -79,6 +79,9 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | TODO | Low-rank RNNs: diagonal quasi-Newton with a Hutchinson diagonal | `python harness_rnn_lowrank.py --methods quasi_hutch` |
 | TODO | Low-rank RNNs: tolerance study | `python rnn_lowrank_tol_study.py` |
 | TODO | Low-rank RNNs: scan tree (Blelloch vs. Hillis-Steele, float64) | `python harness_rnn_lowrank.py --configs std:200:0 mlp:200:8 --methods broyden accel --no_timing --x64 --scan_tree {blelloch,hillis_steele} --out <name>.pkl` |
+| TODO | Low-rank RNN (earlier configuration: dt=3, N up to 200, T up to 2e5): rank compression (sequential solve vs. QR+SVD vs. randomized) | `wandb sweep sweep_rnn_A_compress.yaml` |
+| TODO | Low-rank RNN (earlier configuration): limited-memory rule, truncation vs. L-BFGS-style identity rescaling | `wandb sweep sweep_rnn_A_broyden_rescaled.yaml` |
+| TODO | Low-rank RNN (earlier configuration): damping of Parallel Broyden | `wandb sweep sweep_rnn_A_broyden_damping.yaml` |
 | TODO | GRU | `python harness_gru.py -m alg=seq,deer,quasi D=32 tol=1e-5`<br>`python harness_gru.py -m alg=broyden D=32 bd_m=1,2,3,5,10,15,20 tol=1e-5`<br>`python harness_gru.py -m alg=accelerated_broyden D=32 acc_m=1,2,3,5,10,15,20 tol=1e-5` |
 | TODO | Discretized mean-field RNN (D=128, g=1.7, T=1e4, 32 chains, tol=1e-4, float32): Newton, quasi-DEER, Parallel Broyden m in {1,5,...,80}, Accelerated Parallel Broyden m in {1,5,10,15,20} | `sbatch run_sweep_dmf_rnn.sh` (commands inside), then `python dmf_wandb_to_dataframe.py saved_files/<name>.pkl --since <start> --T 10000 --batch_size 32` (latest run per setting) |
 | TODO | S_N word problem | `python harness_sn_word.py -m alg=seq,deer,quasi N=5,15,30`<br>`python harness_sn_word.py -m alg=accelerated_broyden N=<N> acc_m=<m list>` (N=5: `1,3,4,5`; N=15: `5,10,12,13,15`; N=30: `1,3,5,10,15,20,30`) |
