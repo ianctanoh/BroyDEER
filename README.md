@@ -11,7 +11,6 @@ discrete-time dynamical systems, written in JAX. The package (`broydeer`) contai
 | Picard, Newton (DEER) and diagonal quasi-Newton (quasi-DEER) | `src/algs/deer.py` |
 | Parallel Broyden (`alg=broyden`) | `src/algs/broyden_deer.py` |
 | Accelerated Parallel Broyden (`alg=accelerated_broyden`) | `src/algs/accelerated_broyden.py` |
-| Global Broyden over the full TD x TD Jacobian | `src/algs/full_broyden.py` |
 | Triangular Anderson Acceleration (TAA, adapted from ParaTAA) | `src/algs/taa.py` |
 | Associative-scan tree topologies (Blelloch / Hillis-Steele) | `src/algs/scan_trees.py` |
 | DDIM-specialized variants (Picard, DEER, Broyden, Accelerated Broyden) | `src/algs/*_ddim.py` |
@@ -92,8 +91,7 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | App. D (Tables 3-6) | Convergence diagnostics (sigma, rho, Dennis-More, compression error) along solver runs | `python theory/broyden_theory_diagnostics.py`, `python theory/broyden_theory_diagnostics.py --methods quasi --sigma_every 100000 --num_iters 200 --out saved_files/broyden_theory_diagnostics_quasi_sigma_last.pkl`, `python theory/broyden_theory_diagnostics_nschools.py --S 10 50 100`, then `python theory/make_theory_summary.py` |
 | Tables 11, 12 | Runtime decomposition and wall-clock breakdown | `python speedup/speedup_decomposition.py --lowrank <low-rank pkl> --nschools <N-schools pkl> --dit <DiT pkl>` (results of the Fig. 1-3 rows), `python speedup/wallclock_breakdown.py`, `python speedup/wallclock_breakdown.py --benchmarks dit --precision default --out saved_files/wallclock_breakdown_dit_default_precision.pkl`, then `python speedup/make_speedup_tables.py` |
 
-The DiT scripts write their results to `figs/dit/`. Exploratory notebooks are
-in `nbs/`.
+The DiT scripts write their results to `figs/dit/`.
 
 ## Citation
 

@@ -18,3 +18,4 @@ figs/
 # Slurm job logs
 *.out
 *.err
+nbs/
