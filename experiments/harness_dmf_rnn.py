@@ -166,7 +166,7 @@ def main(cfg: DictConfig):
     if alg not in eval_fns:
         raise ValueError(f"Invalid algorithm: {alg}. Choose from {list(eval_fns.keys())}")
 
-    use_highest = alg in ("deer", "quasi", "broyden", "accelerated_broyden")
+    use_highest = alg in ("seq", "deer", "quasi", "broyden", "accelerated_broyden")   # no TF32 (incl. the reference)
 
     # jit once -- deer_fxn (and thus eval_fn) is identical across chains,
     # so re-using this compiled function across the loop below does not
