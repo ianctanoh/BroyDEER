@@ -15,7 +15,7 @@ Differences from ParaTAA:
     prediction direction, allowing many parallel "future" sample updates from a
     single eps evaluation.
   - No sliding window over timesteps: all T timesteps are updated at every
-    iteration, matching the BroDeer convention used by deer_alg, picard_alg, etc.
+    iteration, matching the BroyDEER convention used by deer_alg, picard_alg, etc.
   - All T timesteps share the same valid-memory depth (no per-timestep
     memory_indexes book-keeping), since they advance in lock-step.
 
@@ -280,7 +280,7 @@ def taa_ddim_alg(
     on the *current* iterate -- which we already pay for once per outer step,
     so order > 1 is essentially free.
 
-    BroDeer index convention:
+    BroyDEER index convention:
         X[0] = initial_state = x_T
         X[s] = states[s - 1] = x_{T - s}    for s = 1, ..., T
         a[s] = coef_x[T - s], b[s] = coef_eps[T - s], n[s] = coef_noise[T - s]
@@ -399,7 +399,7 @@ def taa_ddim_alg(
                 + coef_eps_local[t] * eps
                 + coef_noise_local[t] * z)
 
-    # --- precompute lookahead coefficient matrices (BroDeer index) ---
+    # --- precompute lookahead coefficient matrices (BroyDEER index) ---
     s_idx     = jnp.arange(T)
     t_per_s   = T - s_idx                                        # (T,) DDIM ts
     a_per_s   = coef_x_local[t_per_s]                            # (T,)
@@ -451,7 +451,7 @@ def taa_ddim_alg(
         wtol2 = float(window_tol2)
         front_init = jnp.int32(0)
         s_idx_full = jnp.arange(T, dtype=jnp.int32)
-        # noise_thr in BroDeer's per-s indexing (s = 0..T-1, t_per_s[s] = T - s)
+        # noise_thr in BroyDEER's per-s indexing (s = 0..T-1, t_per_s[s] = T - s)
         noise_thr_per_s = noise_thr_local[t_per_s]                    # (T,)
 
         # mem_count tracks per-position rolling-memory pushes (matches

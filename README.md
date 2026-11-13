@@ -4,7 +4,7 @@ Code for **Parallel Broyden Methods for Efficiently Evaluating Nonlinear State S
 (Ian C. Tanoh and Scott W. Linderman, NeurIPS 2026, [arXiv:2611.13523](https://arxiv.org/abs/2611.13523)).
 
 Quasi-Newton (Broyden) fixed-point solvers for parallelizing the evaluation of
-discrete-time dynamical systems, written in JAX. The package (`brodeer`) contains:
+discrete-time dynamical systems, written in JAX. The package (`broydeer`) contains:
 
 | Solver | Module |
 | --- | --- |

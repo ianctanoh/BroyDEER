@@ -123,7 +123,7 @@ def broyden_ddim_alg(
                 + coef_eps_local[t] * eps
                 + coef_noise_local[t] * z)
 
-    # Precompute per-step DDIM coefficients in BroDeer index order.
+    # Precompute per-step DDIM coefficients in BroyDEER index order.
     s_idx   = jnp.arange(T)
     t_per_s = T - s_idx                            # (T,) DDIM timesteps
     a_per_s = coef_x_local[t_per_s]                # (T,)

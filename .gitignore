@@ -1,6 +1,6 @@
 __pycache__/
 *.egg-info/
-brodeer_venv/
+broydeer_venv/
 *.pyc
 .ipynb_checkpoints/
 wandb/

@@ -13,7 +13,7 @@ system suitable for DEER / Broyden-DEER / accelerated-Broyden / full-Broyden:
     state[s+1] = f(state[s], driver[s])
 
 where state[s] = x_{T-s}, so state[0] is pure noise and state[T] is the clean
-image. The driver at BroDeer step s carries the per-step injected noise z_t
+image. The driver at BroyDEER step s carries the per-step injected noise z_t
 and the original DDIM timestep index t = T - s.
 
 The dynamics function evaluates a noise predictor eps_theta -- which can be a
@@ -22,7 +22,7 @@ one DDIM update.
 
 The toy factory `make_toy_diffusion` plugs in `ToyEps`, the Bayes-optimal
 noise predictor for data ~ N(mu, I). This gives a fully analytic test problem
-where the BroDeer fixed point is known to match sequential DDIM exactly.
+where the BroyDEER fixed point is known to match sequential DDIM exactly.
 """
 
 import jax
@@ -98,7 +98,7 @@ def build_ddim_coeffs(alpha_bar, eta=0.0):
 class ToyEps(eqx.Module):
     """
     Closed-form eps predictor for data ~ N(mu, I). Stand-in for a trained
-    neural noise predictor; useful for validating BroDeer integration on a
+    neural noise predictor; useful for validating BroyDEER integration on a
     DDIM problem with a known answer.
 
     For x_0 ~ N(mu, I), the marginal at time t is
@@ -169,7 +169,7 @@ class DDIMDynamics(eqx.Module):
                      + coef_eps[t] * eps_model(state[s], t)
                      + coef_noise[t] * z[s]
 
-    where t = T - s is the original DDIM timestep. With BroDeer's convention
+    where t = T - s is the original DDIM timestep. With BroyDEER's convention
     (initial_state plus a length-T trajectory of states), state[0] = x_T is
     pure noise and the final state of the trajectory is the clean image x_0.
 
@@ -221,7 +221,7 @@ def make_toy_diffusion(D=16, T=50, mu=None, eta=0.0,
                        beta_min=1e-4, beta_max=1e-1, seed=0):
     """
     Build a toy DDIM dynamical system whose noise predictor is the closed-form
-    Bayes-optimal score for data ~ N(mu, I). Useful for validating BroDeer
+    Bayes-optimal score for data ~ N(mu, I). Useful for validating BroyDEER
     integration on the DDIM problem structure without any neural network.
 
     Args:
@@ -282,13 +282,13 @@ def make_toy_diffusion(D=16, T=50, mu=None, eta=0.0,
         out = deer_fxn(state, driver)
         return out, out
 
-    # initial state = pure noise (BroDeer initial_state = x_T)
+    # initial state = pure noise (BroyDEER initial_state = x_T)
     x0 = jr.normal(k_init, (D,))
 
     # per-step injected noise vectors (only used when eta > 0)
     z_per_step = jr.normal(k_noise, (T, D))
 
-    # at BroDeer step s, the original DDIM timestep is t = T - s
+    # at BroyDEER step s, the original DDIM timestep is t = T - s
     # so drivers[0] uses t = T (first DDIM transition x_T -> x_{T-1})
     # and drivers[T - 1] uses t = 1 (last DDIM transition x_1 -> x_0)
     t_indices = (T - jnp.arange(T)).astype(jnp.float32)

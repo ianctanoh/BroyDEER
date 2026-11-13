@@ -2,7 +2,7 @@
 DiT (Diffusion Transformer) ported to JAX / Equinox.
 
 Exact port of Meta's DiT architecture (github.com/facebookresearch/DiT)
-for use with BroDeer's DEER and TAA algorithms.  Loads pretrained PyTorch
+for use with BroyDEER's DEER and TAA algorithms.  Loads pretrained PyTorch
 weights (e.g. DiT-XL-2-256x256.pt) and runs inference in JAX via the
 DDIMDynamics interface.
 
