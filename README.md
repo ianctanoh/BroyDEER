@@ -22,7 +22,9 @@ JAX port of DiT-XL/2 is in `src/models/dit.py`.
 
 ## Installation
 
-Requires Python >= 3.10 and a CUDA 12 GPU for the timing experiments.
+Requires Python >= 3.10 and a CUDA 12 GPU for the timing experiments. The paper's runtimes were measured on a
+single NVIDIA H100 (80 GB); the largest Newton runs (T=1e5) need most of its memory. Iteration counts are
+reproducible across GPUs (fixed seeds), runtimes are not.
 
 ```bash
 python -m venv broydeer_venv
@@ -62,7 +64,9 @@ wandb sweep <sweep_file>.yaml        # prints a sweep id
 wandb agent <entity>/<project>/<sweep_id>
 ```
 
-and export finished sweeps to pandas pickles with
+(this needs a wandb account and `wandb login`). The Hydra harnesses also run without an account with
+`mode=offline`; the DMF and N-schools converters below read the local `wandb/` run folders, so offline runs
+work with them. Export finished sweeps to pandas pickles with
 
 ```bash
 python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
@@ -85,8 +89,8 @@ python wandb_sweep_to_pickle.py --project <entity>/<project> --sweep_id <id> \
 | Fig. 5 | Low-rank RNN (earlier configuration: dt=3, N up to 200, T up to 2e5): rank compression (sequential solve vs. QR+SVD vs. randomized) | `wandb sweep sweep_rnn_A_compress.yaml` |
 | Fig. 6 | Low-rank RNN (earlier configuration): truncation vs. L-BFGS-style identity rescaling | `wandb sweep sweep_rnn_A_broyden_rescaled.yaml` |
 | Fig. 7 | Low-rank RNN (earlier configuration): damping of Parallel Broyden | `wandb sweep sweep_rnn_A_broyden_damping.yaml` |
-| App. D (Tables 3-6) | Convergence diagnostics (sigma, rho, Dennis-More, compression error) along solver runs | `python theory/broyden_theory_diagnostics.py [--methods quasi --rho_only]`, `python theory/broyden_theory_diagnostics_nschools.py`, then `python theory/make_theory_summary.py` |
-| Tables 11, 12 | Runtime decomposition and wall-clock breakdown | `python speedup/speedup_decomposition.py`, `python speedup/wallclock_breakdown.py` (DiT: `--benchmarks dit --precision default`), then `python speedup/make_speedup_tables.py` |
+| App. D (Tables 3-6) | Convergence diagnostics (sigma, rho, Dennis-More, compression error) along solver runs | `python theory/broyden_theory_diagnostics.py`, `python theory/broyden_theory_diagnostics.py --methods quasi --sigma_every 100000 --num_iters 200 --out saved_files/broyden_theory_diagnostics_quasi_sigma_last.pkl`, `python theory/broyden_theory_diagnostics_nschools.py --S 10 50 100`, then `python theory/make_theory_summary.py` |
+| Tables 11, 12 | Runtime decomposition and wall-clock breakdown | `python speedup/speedup_decomposition.py --lowrank <low-rank pkl> --nschools <N-schools pkl> --dit <DiT pkl>` (results of the Fig. 1-3 rows), `python speedup/wallclock_breakdown.py`, `python speedup/wallclock_breakdown.py --benchmarks dit --precision default --out saved_files/wallclock_breakdown_dit_default_precision.pkl`, then `python speedup/make_speedup_tables.py` |
 
 The DiT scripts write their results to `figs/dit/`. Exploratory notebooks are
 in `nbs/`.

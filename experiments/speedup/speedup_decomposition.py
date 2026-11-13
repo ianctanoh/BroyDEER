@@ -14,6 +14,7 @@ Ratios are baseline / Broyden variant (> 1: the Broyden variant is better).
 Output: saved_files/speedup_decomposition.csv (and .pkl)
 """
 
+import argparse
 import os
 import pickle
 
@@ -22,6 +23,14 @@ import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SF = os.path.join(ROOT, "experiments", "saved_files")
+p = argparse.ArgumentParser()
+p.add_argument("--lowrank", default=os.path.join(SF, "2026-11-04_rnn_lowrank_final.pkl"),
+               help="low-rank RNN results (rnn_lowrank_to_dataframe.py)")
+p.add_argument("--nschools", default=os.path.join(SF, "2026-10-27_Nschools_final_float32.pkl"),
+               help="N-schools results (wandb_sweep_to_pickle.py on Nschools_final_float32.yaml)")
+p.add_argument("--dit", default=os.path.join(ROOT, "figs", "dit", "dit_32images_results.pkl"),
+               help="DiT results (run_dit_32images.py)")
+args = p.parse_args()
 BROYDEN = {"broyden": "Parallel Broyden", "accelerated_broyden": "Accelerated Parallel Broyden"}
 rows = []
 
@@ -35,7 +44,7 @@ def add(benchmark, setting, base, var, it_b, it_v, t_b, t_v):
 
 
 # --- low-rank RNN: converged instances ---
-lr = pd.read_pickle(os.path.join(SF, "2026-11-04_rnn_lowrank_final.pkl"))
+lr = pd.read_pickle(args.lowrank)
 lr = lr[lr.error.isna()]
 for (model, D, dt, T), g in lr.groupby(["model", "D", "dt", "T"]):
     by = {r.alg: r for r in g.itertuples()}
@@ -48,7 +57,7 @@ for (model, D, dt, T), g in lr.groupby(["model", "D", "dt", "T"]):
                     b.time_median, v.time_median)
 
 # --- N-schools: all instances ---
-ns = pd.read_pickle(os.path.join(SF, "2026-10-27_Nschools_final_float32.pkl"))
+ns = pd.read_pickle(args.nschools)
 for (S, T), g in ns.groupby(["S", "T"]):
     by = {r.alg: r for r in g.itertuples()}
     setting = f"S={S} T={T}"
@@ -61,7 +70,7 @@ for (S, T), g in ns.groupby(["S", "T"]):
                     float(np.median(v.per_chain_times)))
 
 # --- DiT: means over images ---
-dit = pickle.load(open(os.path.join(ROOT, "figs", "dit", "dit_32images_results.pkl"), "rb"))
+dit = pickle.load(open(args.dit, "rb"))
 mean = lambda meth, f: float(np.mean(list(dit[meth][f].values())))
 for base, bname in (("QuasiDEER", "quasi_hutchinson"), ("Picard", "picard"), ("TAA", "paratAA")):
     for var, vname in (("Broyden", "broyden"), ("AccBroyden", "accelerated_broyden")):
