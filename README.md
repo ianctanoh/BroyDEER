@@ -34,9 +34,7 @@ pip install -e ".[dit]"     # additionally: PyTorch, diffusers, lpips for DiT ex
 
 The paper's experiments run in float32. The RNN and N-schools experiments use highest-precision
 matrix multiplications (no TF32), which the harnesses set themselves (`jax_default_matmul_precision="highest"`).
-The DiT experiments use JAX's default precision (TF32 on recent GPUs). Do not set `JAX_ENABLE_X64=True` for them.
-The N-schools commands below set `JAX_ENABLE_X64=False` explicitly, since `harness_Nschools.py` defaults to float64
-otherwise.
+The DiT experiments use JAX's default precision (TF32 on recent GPUs).
 
 ### DiT weights
 
