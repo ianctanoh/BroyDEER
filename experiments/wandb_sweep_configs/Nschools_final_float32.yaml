@@ -1,5 +1,4 @@
 # N-schools FINAL comparison (float32, tol=1e-3) with tuned defaults: Broyden bd_k=0.3 without line search; Accelerated Broyden acc_k=0.1 with line search (acc_ls_c=0.001); quasi_k=0; deer_k=0. S up to 200.
-# damping: k=0 for deer, k=0.2 for quasi, broyden and accelerated_broyden
 command:
   - ${env}
   - JAX_PLATFORMS=cuda
