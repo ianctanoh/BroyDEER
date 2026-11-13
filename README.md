@@ -22,8 +22,8 @@ JAX port of DiT-XL/2 is in `src/models/dit.py`.
 ## Installation
 
 Requires Python >= 3.10 and a CUDA 12 GPU for the timing experiments. The paper's runtimes were measured on a
-single NVIDIA H100 (80 GB). The largest Newton runs (T=1e5) need most of its memory. Iteration counts are
-reproducible across GPUs (fixed seeds), runtimes are not.
+single NVIDIA H100 (80 GB). The largest Newton runs (T=1e5) need most of its memory. Runs use fixed seeds, so iteration counts should closely match the
+paper. Runtimes depend on the hardware.
 
 ```bash
 python -m venv broydeer_venv
