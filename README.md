@@ -11,7 +11,7 @@ discrete-time dynamical systems, written in JAX. The package (`broydeer`) contai
 | Picard, Newton (DEER) and diagonal quasi-Newton (quasi-DEER) | `src/algs/deer.py` |
 | Parallel Broyden (`alg=broyden`) | `src/algs/broyden_deer.py` |
 | Accelerated Parallel Broyden (`alg=accelerated_broyden`) | `src/algs/accelerated_broyden.py` |
-| Triangular Anderson Acceleration (TAA, adapted from ParaTAA) | `src/algs/taa.py` |
+| Triangular Anderson Acceleration (TAA, adapted from [ParaTAA](https://arxiv.org/abs/2402.09970)) | `src/algs/taa.py` |
 | Associative-scan tree topologies (Blelloch / Hillis-Steele). All experiments use the Blelloch-type scan of `jax.lax.associative_scan`, except the scan-tree comparison (Table 2) | `src/algs/scan_trees.py` |
 | DDIM-specialized variants (Picard, DEER, Broyden, Accelerated Broyden) | `src/algs/*_ddim.py` |
 
